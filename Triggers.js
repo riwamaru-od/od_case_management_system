@@ -2,27 +2,32 @@
  * Triggers.gs
  * onOpen / onEdit（インストール型） / 時間主導型トリガーの入り口をまとめる。
  *
+ * インストール型トリガーは「登録したユーザー個人」に紐づき、
+ * ScriptApp.getProjectTriggers() も実行ユーザー自身のトリガーしか返さない。
+ * この性質を踏まえ、トリガー登録は用途ごとに2つの関数へ分離している。
+ *
  * セットアップ手順:
- *   1) この関数をエディタから1回だけ手動実行する: installTriggers()
- *      → onEdit（インストール型）と、毎日0:30に走る dailyScheduledTasks() が登録される。
- *   2) 単純トリガー onEdit(e) は権限の都合上フル機能を実行できないため、
- *      本プロジェクトでは自動採番などの副作用を伴う処理は全てインストール型トリガー
- *      （onEditInstallable）側で行う。単純トリガーの onEdit(e) は何もしない。
- *   3) サイドバーの自動オープンは、インストール型の onOpen トリガー
- *      （onOpenInstallable）が担当する。単純トリガーの onOpen() からも
- *      念のため試みるが、単純トリガーは認可を必要とする処理を含むと実行自体が
- *      スキップされるため、確実に開かせるにはインストール型トリガーが必要。
- *      重要: インストール型トリガーは「登録したユーザー個人」に紐づくため、
- *      自動オープンを使いたい利用者はそれぞれ自分のアカウントで一度
- *      installTriggers() を実行する必要がある（実行時に認可ダイアログが出る）。
- *      未登録の利用者も、メニュー「案件管理システム > サイドバーを開く」から
- *      いつでも手動で開ける。
+ *   1) 【管理者のみ1回】管理用アカウントでエディタから installTriggers() を実行する。
+ *      → 自動採番（onEditInstallable）・日次処理（dailyScheduledTasks）に加えて、
+ *        実行者本人のサイドバー自動表示トリガーが登録される。
+ *      重要: onEdit と日次処理は「誰か1人だけ」が登録すること。複数人が登録すると
+ *      1回の編集で人数分の採番処理が走り、請求予定レポートも人数分重複送信される。
+ *   2) 【利用者が各自1回】メニュー「案件管理システム > サイドバー自動表示を有効にする」
+ *      をクリックする（スクリプトエディタを開く必要はない）。
+ *      → その人専用のサイドバー自動表示トリガー（onOpenInstallable）だけが登録される。
+ *        初回はGoogleの認可ダイアログが表示されるので承認すること。
+ *   3) 単純トリガー onEdit(e) は権限の都合上フル機能を実行できないため、
+ *      副作用を伴う処理は全てインストール型トリガー側で行う（onEdit(e) は何もしない）。
+ *      自動表示を設定していない利用者も、メニュー「サイドバーを開く」からいつでも開ける。
  */
 
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('案件管理システム')
     .addItem('サイドバーを開く', 'showSidebar')
+    .addSeparator()
+    .addItem('サイドバー自動表示を有効にする', 'enableSidebarAutoOpen')
+    .addItem('サイドバー自動表示を解除する', 'disableSidebarAutoOpen')
     .addToUi();
   // 単純トリガーの文脈では失敗しうるため、確実な自動オープンは
   // インストール型トリガー（onOpenInstallable）側に任せる。
@@ -89,17 +94,63 @@ function dailyScheduledTasks() {
 }
 
 /**
- * 初回セットアップ用。既存トリガーを削除してから登録し直す（重複登録防止）。
- * インストール型トリガーは実行したユーザー個人に紐づくため、サイドバーの自動
- * オープンを利用したい担当者は、それぞれ自分のアカウントでこの関数を1度実行すること。
+ * 実行ユーザー自身が持つ、指定ハンドラ関数のトリガーだけを削除する。
+ * （getProjectTriggers() は実行ユーザーのトリガーしか返さないため、
+ *  他の担当者が登録したトリガーには影響しない）
  */
-function installTriggers() {
-  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+function deleteMyTriggersByHandler_(handlerName) {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === handlerName)
+    .forEach(t => ScriptApp.deleteTrigger(t));
+}
 
+/**
+ * 【利用者が各自1回実行】サイドバー自動表示トリガーを、実行ユーザー個人に対して登録する。
+ * 複数人がそれぞれ実行してよい（各自のトリガーは独立しており、他の人には影響しない）。
+ * 重複登録を避けるため、自分の既存トリガーがあれば削除してから作り直す。
+ */
+function installSidebarAutoOpenTrigger() {
+  deleteMyTriggersByHandler_('onOpenInstallable');
   ScriptApp.newTrigger('onOpenInstallable')
     .forSpreadsheet(getMainSpreadsheet_())
     .onOpen()
     .create();
+}
+
+/** メニュー「サイドバー自動表示を有効にする」から呼ばれる */
+function enableSidebarAutoOpen() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    installSidebarAutoOpenTrigger();
+    ui.alert('サイドバー自動表示を有効にしました。\n次回このスプレッドシートを開いたときから、自動的にサイドバーが表示されます。');
+  } catch (e) {
+    console.error(`enableSidebarAutoOpen error: ${e && e.stack ? e.stack : e}`);
+    ui.alert(`サイドバー自動表示の設定に失敗しました。\n${e && e.message ? e.message : e}`);
+  }
+}
+
+/** メニュー「サイドバー自動表示を解除する」から呼ばれる */
+function disableSidebarAutoOpen() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    deleteMyTriggersByHandler_('onOpenInstallable');
+    ui.alert('サイドバー自動表示を解除しました。\nメニュー「サイドバーを開く」からはこれまで通り手動で開けます。');
+  } catch (e) {
+    console.error(`disableSidebarAutoOpen error: ${e && e.stack ? e.stack : e}`);
+    ui.alert(`サイドバー自動表示の解除に失敗しました。\n${e && e.message ? e.message : e}`);
+  }
+}
+
+/**
+ * 【管理者のみ1回実行】システム全体で1組だけ必要なトリガーを登録する。
+ * 自動採番（onEditInstallable）と日次処理（dailyScheduledTasks）は、
+ * 複数人が登録すると1回の編集で人数分の処理が走り、請求予定レポートも
+ * 人数分重複送信されてしまうため、必ず管理用アカウント1人だけが登録すること。
+ * あわせて、実行者本人のサイドバー自動表示トリガーも登録する。
+ */
+function installTriggers() {
+  deleteMyTriggersByHandler_('onEditInstallable');
+  deleteMyTriggersByHandler_('dailyScheduledTasks');
 
   ScriptApp.newTrigger('onEditInstallable')
     .forSpreadsheet(getMainSpreadsheet_())
@@ -112,4 +163,6 @@ function installTriggers() {
     .atHour(0)
     .nearMinute(30)
     .create();
+
+  installSidebarAutoOpenTrigger();
 }
