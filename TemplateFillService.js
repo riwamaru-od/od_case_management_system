@@ -46,6 +46,12 @@ function fillSerialNumber_(sheet, cells, docTypeKey) {
   setCellValue_(sheet, cells.SERIAL_NO, serial);
 }
 
+/** 指定ファイル（見積書/請求書）の現行「最新」シートから、通し番号（SERIAL_NO）の現在値を読み取る */
+function readDocumentSerialNo_(fileId, docType) {
+  const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
+  return sheet.getRange(docType.cells().SERIAL_NO).getValue();
+}
+
 /** 見積書ファイルへヘッダー一式を書き込む */
 function fillQuoteDocument_(file, caseInfo) {
   const sheet = getPrimarySheet_(file, DOC_TYPES.quote);
@@ -76,6 +82,9 @@ function fillInvoiceDocument_(file, caseInfo, quoteFileId) {
   fillStaffCells_(sheet, cells, staff);
   fillSerialNumber_(sheet, cells, 'invoice');
 
+  const quoteSerialNo = readDocumentSerialNo_(quoteFileId, DOC_TYPES.quote);
+  setCellValue_(sheet, cells.QUOTE_SERIAL_REF, `見積書No.${quoteSerialNo}`);
+
   copyRanges_(quoteFileId, DOC_TYPES.quote, sheet, QUOTE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_INVOICE);
 }
 
@@ -89,6 +98,12 @@ function fillDeliveryDocument_(file, caseInfo, invoiceFileId) {
   fillCommonHeaderCells_(sheet, cells, client, caseInfo);
   fillStaffCells_(sheet, cells, staff);
   fillSerialNumber_(sheet, cells, 'delivery');
+
+  const quoteFileId = extractFileIdFromUrl_(caseInfo.quoteLink);
+  const quoteSerialNo = readDocumentSerialNo_(quoteFileId, DOC_TYPES.quote);
+  const invoiceSerialNo = readDocumentSerialNo_(invoiceFileId, DOC_TYPES.invoice);
+  setCellValue_(sheet, cells.QUOTE_SERIAL_REF, `見積書No.${quoteSerialNo}`);
+  setCellValue_(sheet, cells.INVOICE_SERIAL_REF, `請求書No.${invoiceSerialNo}`);
 
   copyRanges_(invoiceFileId, DOC_TYPES.invoice, sheet, INVOICE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_DELIVERY);
 }
@@ -131,7 +146,11 @@ function copyRangeAcrossSpreadsheets_(sourceRange, targetRange) {
   targetRange.setWrapStrategies(sourceRange.getWrapStrategies());
 }
 
-/** 承認後、社印画像を指定範囲へ挿入する（G8:G13相当） */
+/**
+ * 社印画像を指定範囲へ挿入する（G8:G13相当。見積書・請求書は承認時、納品書は作成時に呼ぶ）。
+ * サイズは Constants.js の SEAL_IMAGE_WIDTH_PX / SEAL_IMAGE_HEIGHT_PX で明示的に指定する
+ * （画像素材そのものの解像度に依存させないため）。社印サイズを変更したい場合はその2つの値を編集する。
+ */
 function insertSealImage_(file, cells, docType) {
   const sealUrl = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
   if (!sealUrl) {
@@ -140,7 +159,9 @@ function insertSealImage_(file, cells, docType) {
   }
   const sheet = getPrimarySheet_(file, docType);
   const range = sheet.getRange(cells.SEAL_IMAGE_RANGE);
-  sheet.insertImage(sealUrl, range.getColumn(), range.getRow());
+  const image = sheet.insertImage(sealUrl, range.getColumn(), range.getRow());
+  image.setWidth(SEAL_IMAGE_WIDTH_PX);
+  image.setHeight(SEAL_IMAGE_HEIGHT_PX);
 }
 
 /**
@@ -176,4 +197,26 @@ function protectSheet_(sheet) {
 function transferFileOwnerToAdminAccount_(file) {
   const adminEmail = getAdminTriggerAccountEmail_();
   file.setOwner(adminEmail);
+}
+
+/**
+ * ファイルレベルの編集権限を、オーナー（管理用アカウント）以外は閲覧のみへ引き下げる。
+ * protectSheet_（シート保護）は「ファイルのオーナー」の編集権限までは剥奪できない
+ * （Googleスプレッドシートの仕様上、いかなるAPIを使っても回避不可能な制約）ため、
+ * これは「オーナー以外の全員が直接編集できない」状態を保証するための追加の防御層。
+ * 管理用アカウント自身の編集権限を制限する方法は存在しないため、運用上は
+ * ADMIN_TRIGGER_ACCOUNT_EMAIL のログイン情報を日常的な編集作業に使わないことが必須になる。
+ */
+function restrictFileEditAccessToAdminOnly_(file) {
+  const owner = file.getOwner();
+  const ownerEmail = owner ? owner.getEmail() : null;
+  file.getEditors().forEach(editor => {
+    if (ownerEmail && editor.getEmail() === ownerEmail) return;
+    try {
+      file.removeEditor(editor);
+      file.addViewer(editor);
+    } catch (e) {
+      console.warn(`ファイル編集権限の降格に失敗しました(${editor.getEmail()}): ${e}`);
+    }
+  });
 }

@@ -115,7 +115,9 @@ function computeButtonStates_(caseInfo, email) {
 
   return {
     createQuote: b(!caseInfo.quoteLink, '既に見積書が作成されています'),
-    completeQuote: b(s === STATUS.QUOTE_IN_PROGRESS && !!caseInfo.quoteLink, '見積書作成中の案件のみ操作できます'),
+    // 差し戻し後は「再作成」を行うまで、同じ書類のまま完成（承認依頼）を再送できないようにする
+    completeQuote: b(s === STATUS.QUOTE_IN_PROGRESS && !!caseInfo.quoteLink && !caseInfo.quoteRejectedAt,
+      caseInfo.quoteRejectedAt ? '差し戻し後は再作成してから操作してください' : '見積書作成中の案件のみ操作できます'),
     approveQuote: b(isQuoteDrafted && canApproveQuote, !isQuoteDrafted ? '承認待ちの状態ではありません' : '見積書承認の権限がありません'),
     rejectQuote: b(isQuoteDrafted && canApproveQuote, !isQuoteDrafted ? '承認待ちの状態ではありません' : '見積書承認の権限がありません'),
     // 再作成は「差し戻し後」または「承認後」のみ活性化する（承認待ち＝作成直後の作成中と区別するため
@@ -123,22 +125,23 @@ function computeButtonStates_(caseInfo, email) {
     recreateQuote: b((!!caseInfo.quoteRejectedAt || s === STATUS.QUOTE_APPROVED) && canApproveQuote,
       (!caseInfo.quoteRejectedAt && s !== STATUS.QUOTE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '見積書承認の権限がありません'),
 
-    printQuote: b(s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt, '見積書承認済み以降のみ操作できます'),
     exportQuotePdf: b(s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt, '見積書承認済み以降のみ操作できます'),
     createInvoice: b((s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt) && !caseInfo.invoiceLink, !caseInfo.quoteApprovedAt ? '見積書承認済み以降のみ操作できます' : '既に請求書が作成されています'),
 
-    completeInvoice: b(s === STATUS.INVOICE_IN_PROGRESS && !!caseInfo.invoiceLink, '請求書作成中の案件のみ操作できます'),
+    completeInvoice: b(s === STATUS.INVOICE_IN_PROGRESS && !!caseInfo.invoiceLink && !caseInfo.invoiceRejectedAt,
+      caseInfo.invoiceRejectedAt ? '差し戻し後は再作成してから操作してください' : '請求書作成中の案件のみ操作できます'),
     approveInvoice: b(isInvoiceDrafted && canApproveInvoice, !isInvoiceDrafted ? '承認待ちの状態ではありません' : '請求書承認の権限がありません'),
     rejectInvoice: b(isInvoiceDrafted && canApproveInvoice, !isInvoiceDrafted ? '承認待ちの状態ではありません' : '請求書承認の権限がありません'),
     recreateInvoice: b((!!caseInfo.invoiceRejectedAt || s === STATUS.INVOICE_APPROVED) && canApproveInvoice,
       (!caseInfo.invoiceRejectedAt && s !== STATUS.INVOICE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '請求書承認の権限がありません'),
 
-    printInvoice: b(!!caseInfo.invoiceApprovedAt, '請求書承認済み以降のみ操作できます'),
     exportInvoicePdf: b(!!caseInfo.invoiceApprovedAt, '請求書承認済み以降のみ操作できます'),
     createDelivery: b(!!caseInfo.invoiceApprovedAt && !caseInfo.deliveryLink, !caseInfo.invoiceApprovedAt ? '請求書承認済み以降のみ操作できます' : '既に納品書が作成されています'),
 
-    printDelivery: b(!!caseInfo.deliveryLink, '納品書がまだ作成されていません'),
     exportDeliveryPdf: b(!!caseInfo.deliveryLink, '納品書がまだ作成されていません'),
+
+    // 案件中止: 社員なら誰でも、案件が進行中であればいつでも中止できる（承認ロール等の制限なし）
+    cancelCase: b(true, ''),
 
     finalApprove: b(bs === BILLING_STATUS.BILLED && canFinalApprove, bs !== BILLING_STATUS.BILLED ? '請求書・納品書の印刷／PDF出力が完了していません' : '最終承認の権限がありません'),
   };
@@ -176,7 +179,6 @@ function api_completeQuote(caseNo, comment) { return completeDocumentForCase_('q
 function api_approveQuote(caseNo, comment) { return approveDocumentForCase_('quote', caseNo, comment); }
 function api_rejectQuote(caseNo, comment) { return rejectDocumentForCase_('quote', caseNo, comment); }
 function api_recreateQuote(caseNo) { return recreateDocumentForCase_('quote', caseNo); }
-function api_printQuote(caseNo) { return printDocumentForCase_('quote', caseNo); }
 function api_exportQuotePdf(caseNo) { return exportDocumentPdfForCase_('quote', caseNo); }
 
 function api_createInvoice(caseNo) { return createDocumentForCase_('invoice', caseNo); }
@@ -184,11 +186,11 @@ function api_completeInvoice(caseNo, comment) { return completeDocumentForCase_(
 function api_approveInvoice(caseNo, comment) { return approveDocumentForCase_('invoice', caseNo, comment); }
 function api_rejectInvoice(caseNo, comment) { return rejectDocumentForCase_('invoice', caseNo, comment); }
 function api_recreateInvoice(caseNo) { return recreateDocumentForCase_('invoice', caseNo); }
-function api_printInvoice(caseNo) { return printDocumentForCase_('invoice', caseNo); }
 function api_exportInvoicePdf(caseNo) { return exportDocumentPdfForCase_('invoice', caseNo); }
 
 function api_createDelivery(caseNo) { return createDeliveryForCase_(caseNo); }
-function api_printDelivery(caseNo) { return printDocumentForCase_('delivery', caseNo); }
 function api_exportDeliveryPdf(caseNo) { return exportDocumentPdfForCase_('delivery', caseNo); }
+
+function api_cancelCase(caseNo, comment) { return cancelCaseForCase_(caseNo, comment); }
 
 function api_finalApprove(caseNo, comment) { return finalApproveForCase_(caseNo, comment); }

@@ -1,8 +1,8 @@
 /**
  * DeliveryService.gs
  * 納品書は承認フローを持たない（確定仕様どおり）。
- * 請求書をベースに作成し、作成者/作成日時のみ記録する。印刷・PDF出力は
- * ApprovalService.gs の共通関数（printDocumentForCase_ / exportDocumentPdfForCase_）を
+ * 請求書をベースに作成し、作成者/作成日時・社印のみ記録する。PDF出力は
+ * ApprovalService.gs の共通関数（exportDocumentPdfForCase_）を
  * docTypeKey='delivery' で呼び出せば良いように設計している。
  */
 
@@ -22,6 +22,13 @@ function createDeliveryForCase_(caseNo) {
     const cells = docType.cells();
     setCellValue_(sheet, cells.CREATOR_NAME, staff ? staff.name : email);
     setCellValue_(sheet, cells.CREATED_AT, formatDateTime_(now));
+
+    // 納品書には承認フローが無いため、作成時に社印を押す（見積書・請求書は承認時）
+    try {
+      insertSealImage_(file, cells, docType);
+    } catch (e) {
+      console.warn(`社印画像の挿入に失敗しました: ${e}`);
+    }
 
     setCaseFields_(caseNo, {
       [docType.col.link]: file.getUrl(),

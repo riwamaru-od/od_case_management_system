@@ -151,3 +151,26 @@ function removeCaseFromUiAfterFinalApproval_(caseNo) {
     uiSheet.deleteRow(row);
   }
 }
+
+/**
+ * 案件中止: 社員は誰でも、案件が途中の状態からでも中止できる（承認ロール等の制限なし）。
+ * ステータスを「中止」にし、表示用シート（メイン画面UI）からは削除する（全案件DBには残す）。
+ * comment はサイドバーの確認モーダルで入力された中止理由（任意）。
+ * 最終承認の削除処理（removeCaseFromUiAfterFinalApproval_）とは独立した処理として持つ。
+ */
+function cancelCaseForCase_(caseNo, comment) {
+  return withLock_('案件中止', () => {
+    setCaseFields_(caseNo, { [CASE_COLS.STATUS]: STATUS.CANCELLED });
+
+    const uiSheet = getActiveUiSheet_();
+    syncCaseToDb_(caseNo); // 念のため最新状態をDBへバックアップ
+    const row = findRowByCaseNo_(uiSheet, caseNo);
+    if (row) {
+      uiSheet.deleteRow(row);
+    }
+
+    appendOperationLog_(caseNo, '案件中止', comment || '', false);
+
+    return { status: STATUS.CANCELLED };
+  }, caseNo);
+}
