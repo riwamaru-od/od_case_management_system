@@ -12,6 +12,10 @@
  *      メニュー追加に加えて showSidebar() を呼び、サイドバーを自動的に開く。
  *      サイドバー表示はUI操作でありAppsScriptの追加認可を必要としないため、
  *      単純トリガーのままで動作する（インストール型トリガーへの変更は不要）。
+ *      注意: プロジェクトが未認可（スコープ追加後の再認可が済んでいない等）の場合、
+ *      単純トリガーはエラーも出さず実行自体がスキップされる仕様のため、
+ *      自動オープンが効かない場合はエディタから任意の関数（installTriggers() 等）を
+ *      一度手動実行し、認可ダイアログを完了させること。
  */
 
 function onOpen() {
@@ -19,7 +23,11 @@ function onOpen() {
     .createMenu('案件管理システム')
     .addItem('サイドバーを開く', 'showSidebar')
     .addToUi();
-  showSidebar();
+  try {
+    showSidebar();
+  } catch (e) {
+    console.warn(`サイドバーの自動オープンに失敗しました: ${e}`);
+  }
 }
 
 function showSidebar() {

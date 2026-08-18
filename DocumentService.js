@@ -124,64 +124,23 @@ function moveFileOrFolder_(item, destinationFolder) {
   }
 }
 
-/** 列名（A, B, ..., Z, AA, ...）を1始まりの列番号に変換する */
-function columnLetterToIndex_(letters) {
-  let n = 0;
-  for (let i = 0; i < letters.length; i++) {
-    n = n * 26 + (letters.charCodeAt(i) - 64);
-  }
-  return n;
-}
-
-/** "A1:H54" のようなA1形式のセル範囲を、0始まり・終端排他のr1/c1/r2/c2に変換する */
-function parseA1Range_(a1) {
-  const m = String(a1).match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
-  if (!m) {
-    throw AppError_('INVALID_RANGE', `PDF出力範囲の指定が不正です: ${a1}`);
-  }
-  return {
-    c1: columnLetterToIndex_(m[1]) - 1,
-    r1: Number(m[2]) - 1,
-    c2: columnLetterToIndex_(m[3]), // 終端は排他的（=1始まりの終端列番号そのもの）
-    r2: Number(m[4]),
-  };
-}
-
-/** 複数のA1形式レンジを包含する最小の矩形（バウンディングボックス）を求める */
-function computeBoundingBoxFromRanges_(a1Ranges) {
-  const boxes = a1Ranges.map(parseA1Range_);
-  return boxes.reduce((acc, b) => ({
-    r1: Math.min(acc.r1, b.r1),
-    c1: Math.min(acc.c1, b.c1),
-    r2: Math.max(acc.r2, b.r2),
-    c2: Math.max(acc.c2, b.c2),
-  }));
-}
-
 /**
  * PDF書き出し用URLを組み立てる共通ヘルパー。
- * 印刷範囲は Constants.js の PDF_PAGE_RANGES（書類種別ごとのセル指定）から
- * バウンディングボックスを算出して指定し、拡大縮小なし・ページ順序「右へ、それから下へ」で
- * Google側の自動改ページに委ねる（PDF_PAGE_RANGES 冒頭のコメント参照）。
- * docType を渡さない場合は後方互換として1枚目のシート・範囲指定なしで出力する。
+ * 印刷範囲・改ページ位置（見積書=1〜3ページ、請求書/納品書=1〜2ページ。
+ * Constants.js 末尾のコメント参照）は各テンプレート側であらかじめ
+ * 「ファイル > 印刷設定」で手動設定しておく前提とし、ここでは対象シート
+ * （現行の「最新」シート、gid）とA4・余白などの共通パラメータのみ指定する。
+ * docType を渡さない場合は後方互換として1枚目のシートを対象にする。
  */
 function buildPdfExportUrl_(fileId, docType) {
   const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
   const gid = sheet.getSheetId();
   const params = [
-    'format=pdf', `gid=${gid}`, 'size=A4', 'portrait=true',
-    'fitw=false', 'fith=false', 'pageorder=2',
+    'format=pdf', `gid=${gid}`, 'size=A4', 'portrait=true', 'fitw=true',
     'gridlines=false', 'printtitle=false', 'sheetnames=false',
     'top_margin=0.5', 'bottom_margin=0.5', 'left_margin=0.5', 'right_margin=0.5',
-  ];
-
-  const pageRanges = docType && PDF_PAGE_RANGES[docType.key];
-  if (pageRanges && pageRanges.length) {
-    const box = computeBoundingBoxFromRanges_(pageRanges);
-    params.push(`r1=${box.r1}`, `r2=${box.r2}`, `c1=${box.c1}`, `c2=${box.c2}`);
-  }
-
-  return `https://docs.google.com/spreadsheets/d/${fileId}/export?${params.join('&')}`;
+  ].join('&');
+  return `https://docs.google.com/spreadsheets/d/${fileId}/export?${params}`;
 }
 
 /** 指定ファイルをPDFとして書き出し、指定フォルダへ保存する */

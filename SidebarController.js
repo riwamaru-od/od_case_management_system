@@ -68,18 +68,30 @@ function api_getSidebarData(preferredCaseNo) {
  * CASE_COLS.CASE_NO の列番号をそのまま使い回せる）。
  */
 function getSelectedCaseNo_() {
+  let ss, activeSheet;
   try {
-    const ss = getMainSpreadsheet_();
-    const activeUiSheet = getActiveUiSheet_();
-    const activeDbSheet = getActiveDbSheet_();
-    const activeSheet = ss.getActiveSheet();
-    // UIシート・全案件DBシート以外が選択されている場合はnullを返す
-    const isUiOrDbSheet = !!activeSheet && (
-      activeSheet.getSheetId() === activeUiSheet.getSheetId()
-      || activeSheet.getSheetId() === activeDbSheet.getSheetId()
-    );
-    if (!isUiOrDbSheet) return null;
+    ss = getMainSpreadsheet_();
+    activeSheet = ss.getActiveSheet();
+  } catch (e) {
+    return null;
+  }
+  if (!activeSheet) return null;
 
+  // UIシート・全案件DBシートの判定はそれぞれ個別にtry/catchする。
+  // 一方の解決に失敗しても（例: 未整備の期でDBシートが見つからない等）、
+  // もう一方の判定を道連れにして失敗させないようにするため。
+  let isUiOrDbSheet = false;
+  try {
+    isUiOrDbSheet = activeSheet.getSheetId() === getActiveUiSheet_().getSheetId();
+  } catch (e) {}
+  if (!isUiOrDbSheet) {
+    try {
+      isUiOrDbSheet = activeSheet.getSheetId() === getActiveDbSheet_().getSheetId();
+    } catch (e) {}
+  }
+  if (!isUiOrDbSheet) return null;
+
+  try {
     const row = ss.getActiveRange() && ss.getActiveRange().getRow();
     if (!row || row < CASE_DATA_START_ROW) return null;
 
