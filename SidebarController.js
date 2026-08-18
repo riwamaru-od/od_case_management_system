@@ -21,8 +21,9 @@ function include(filename) {
 
 /**
  * サイドバー初期表示・定期更新時に呼ばれる。
- * 「現在選択中の案件」は、メイン画面UIシート上でユーザーが選択しているセルの行から
- * 案件番号列を読み取って特定する（対象シート以外を選択中の場合は caseNo=null を返す）。
+ * 「現在選択中の案件」は、メイン画面UIシートまたは全案件DBシート上でユーザーが
+ * 選択しているセルの行から案件番号列を読み取って特定する
+ * （対象シート以外を選択中の場合は caseNo=null を返す。getSelectedCaseNo_ 参照）。
  */
 function api_getSidebarData(preferredCaseNo) {
   const email = getActiveUserEmail_();

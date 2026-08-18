@@ -8,6 +8,10 @@
  *   2) 単純トリガー onEdit(e) は権限の都合上フル機能を実行できないため、
  *      本プロジェクトでは自動採番などの副作用を伴う処理は全てインストール型トリガー
  *      （onEditInstallable）側で行う。単純トリガーの onEdit(e) は何もしない。
+ *   3) onOpen() はスプレッドシートを開くたびに自動実行される単純トリガー。
+ *      メニュー追加に加えて showSidebar() を呼び、サイドバーを自動的に開く。
+ *      サイドバー表示はUI操作でありAppsScriptの追加認可を必要としないため、
+ *      単純トリガーのままで動作する（インストール型トリガーへの変更は不要）。
  */
 
 function onOpen() {
@@ -15,6 +19,7 @@ function onOpen() {
     .createMenu('案件管理システム')
     .addItem('サイドバーを開く', 'showSidebar')
     .addToUi();
+  showSidebar();
 }
 
 function showSidebar() {
