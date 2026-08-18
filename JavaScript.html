@@ -1,0 +1,159 @@
+<script>
+  // アクション名 → 引数なし(caseNoのみ)で呼べる google.script.run 側関数名
+  const SIMPLE_ACTIONS = {
+    createQuote: 'api_createQuote',
+    recreateQuote: 'api_recreateQuote',
+    printQuote: 'api_printQuote',
+    exportQuotePdf: 'api_exportQuotePdf',
+    createInvoice: 'api_createInvoice',
+    recreateInvoice: 'api_recreateInvoice',
+    printInvoice: 'api_printInvoice',
+    exportInvoicePdf: 'api_exportInvoicePdf',
+    createDelivery: 'api_createDelivery',
+    printDelivery: 'api_printDelivery',
+    exportDeliveryPdf: 'api_exportDeliveryPdf',
+  };
+
+  // アクション名 → コメント入力(comment引数あり)を伴って呼ぶ google.script.run 側関数名
+  const COMMENT_ACTIONS = {
+    completeQuote: 'api_completeQuote',
+    approveQuote: 'api_approveQuote',
+    rejectQuote: 'api_rejectQuote',
+    completeInvoice: 'api_completeInvoice',
+    approveInvoice: 'api_approveInvoice',
+    rejectInvoice: 'api_rejectInvoice',
+    finalApprove: 'api_finalApprove',
+  };
+
+  let currentCaseNo = null;
+  let pendingCommentAction = null;
+  let isBusy = false;
+  let pollTimer = null;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshData();
+    pollTimer = setInterval(refreshData, 4000); // 選択中セルの変化を定期的に反映
+  });
+
+  function refreshData(targetCaseNo) {
+    if (isBusy) return; // 処理中は選択変更による再描画で競合しないようにする
+    const caseNoToFetch = targetCaseNo || currentCaseNo;
+    google.script.run
+      .withSuccessHandler(renderData)
+      .withFailureHandler(err => showToast(err && err.message ? err.message : String(err), true))
+      .api_getSidebarData(caseNoToFetch);
+  }
+
+  function renderData(data) {
+    currentCaseNo = data.caseNo;
+    const emptyState = document.getElementById('emptyState');
+    const caseArea = document.getElementById('caseArea');
+
+    if (!data.caseNo || !data.caseInfo) {
+      emptyState.style.display = 'block';
+      caseArea.style.display = 'none';
+      return;
+    }
+    emptyState.style.display = 'none';
+    caseArea.style.display = 'block';
+
+    const info = data.caseInfo;
+    document.getElementById('caseTitle').textContent = `${info.caseNo}　${info.caseName}`;
+    document.getElementById('caseSub').textContent = `${info.clientName} ／ 担当: ${info.staffInCharge || '-'}`;
+    document.getElementById('statusBadge').textContent = info.status || '-';
+    document.getElementById('billingBadge').textContent = info.billingStatus || '-';
+
+    // ボタンの活性/非活性を反映
+    Object.keys(data.buttons || {}).forEach(action => {
+      const el = document.querySelector(`[data-action="${action}"]`);
+      if (!el) return;
+      const state = data.buttons[action];
+      el.disabled = !state.enabled;
+      el.title = state.reason || '';
+    });
+
+    renderHistory(data.history || []);
+  }
+
+  function renderHistory(history) {
+    const list = document.getElementById('historyList');
+    if (!history.length) {
+      list.innerHTML = '<div class="history-item"><span>まだ記録がありません</span></div>';
+      return;
+    }
+    list.innerHTML = history.map(h => `
+      <div class="history-item">
+        <span>${escapeHtml(h.label)}</span>
+        <span class="who">${escapeHtml(h.who)}｜${escapeHtml(h.when)}</span>
+      </div>
+    `).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  /** コメント不要な操作（作成・再作成・印刷・PDF出力）をそのまま実行する */
+  function runSimple(action) {
+    if (!currentCaseNo || isBusy) return;
+    const fnName = SIMPLE_ACTIONS[action];
+    if (!fnName) return;
+    setBusy(true);
+    google.script.run
+      .withSuccessHandler(result => { setBusy(false); handleActionResult(result); refreshData(currentCaseNo); })
+      .withFailureHandler(err => { setBusy(false); showToast(err && err.message ? err.message : String(err), true); })
+      [fnName](currentCaseNo);
+  }
+
+  /** コメント入力が必要な操作（完成／承認／差し戻し／最終承認）のモーダルを開く */
+  function openComment(action, title) {
+    if (!currentCaseNo || isBusy) return;
+    pendingCommentAction = action;
+    document.getElementById('commentModalTitle').textContent = title;
+    document.getElementById('commentText').value = '';
+    document.getElementById('commentModal').classList.add('open');
+  }
+
+  function closeComment() {
+    pendingCommentAction = null;
+    document.getElementById('commentModal').classList.remove('open');
+  }
+
+  function submitComment() {
+    if (!pendingCommentAction || !currentCaseNo) return;
+    const fnName = COMMENT_ACTIONS[pendingCommentAction];
+    const comment = document.getElementById('commentText').value;
+    const action = pendingCommentAction;
+    closeComment();
+    setBusy(true);
+    google.script.run
+      .withSuccessHandler(result => { setBusy(false); handleActionResult(result); refreshData(currentCaseNo); })
+      .withFailureHandler(err => { setBusy(false); showToast(err && err.message ? err.message : String(err), true); })
+      [fnName](currentCaseNo, comment);
+  }
+
+  /** 印刷/出力アクションの結果としてURLが返ってきた場合、新規タブで開く */
+  function handleActionResult(result) {
+    if (!result) return;
+    if (result.printUrl) window.open(result.printUrl, '_blank');
+    if (result.pdfUrl) window.open(result.pdfUrl, '_blank');
+    if (result.url) window.open(result.url, '_blank');
+    showToast('処理が完了しました。');
+  }
+
+  function setBusy(busy) {
+    isBusy = busy;
+    document.getElementById('loading-overlay').classList.toggle('show', busy);
+  }
+
+  let toastTimer = null;
+  function showToast(message, isError) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = isError ? 'show error' : 'show';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.className = ''; }, 4000);
+  }
+</script>

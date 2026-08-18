@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+
+  <div class="refresh-row">
+    <strong>案件管理</strong>
+    <button id="refreshBtn" onclick="refreshData()">更新</button>
+  </div>
+
+  <div id="emptyState" class="card empty-state" style="display:none;">
+    メイン画面UIシート上で、案件の行（いずれかのセル）を選択してください。
+  </div>
+
+  <div id="caseArea" style="display:none;">
+
+    <div class="card">
+      <p class="case-title" id="caseTitle">-</p>
+      <p class="case-sub" id="caseSub">-</p>
+      <div class="badges">
+        <span class="badge" id="statusBadge">-</span>
+        <span class="badge billing" id="billingBadge">-</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>見積書</h2>
+      <div class="btn-row">
+        <button class="action" data-action="createQuote" onclick="runSimple('createQuote')">見積書作成</button>
+        <button class="action" data-action="completeQuote" onclick="openComment('completeQuote','見積書完成（承認依頼）')">見積書完成</button>
+      </div>
+      <div class="btn-row">
+        <button class="action" data-action="approveQuote" onclick="openComment('approveQuote','見積書承認')">見積書承認</button>
+        <button class="action secondary" data-action="rejectQuote" onclick="openComment('rejectQuote','差し戻し')">差し戻し</button>
+        <button class="action secondary" data-action="recreateQuote" onclick="runSimple('recreateQuote')">再作成</button>
+      </div>
+      <div class="btn-row">
+        <button class="action secondary" data-action="printQuote" onclick="runSimple('printQuote')">見積書印刷</button>
+        <button class="action secondary" data-action="exportQuotePdf" onclick="runSimple('exportQuotePdf')">見積書出力(PDF)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>請求書</h2>
+      <div class="btn-row">
+        <button class="action" data-action="createInvoice" onclick="runSimple('createInvoice')">請求書作成</button>
+        <button class="action" data-action="completeInvoice" onclick="openComment('completeInvoice','請求書完成（承認依頼）')">請求書完成</button>
+      </div>
+      <div class="btn-row">
+        <button class="action" data-action="approveInvoice" onclick="openComment('approveInvoice','請求書承認')">請求書承認</button>
+        <button class="action secondary" data-action="rejectInvoice" onclick="openComment('rejectInvoice','差し戻し')">差し戻し</button>
+        <button class="action secondary" data-action="recreateInvoice" onclick="runSimple('recreateInvoice')">再作成</button>
+      </div>
+      <div class="btn-row">
+        <button class="action secondary" data-action="printInvoice" onclick="runSimple('printInvoice')">請求書印刷</button>
+        <button class="action secondary" data-action="exportInvoicePdf" onclick="runSimple('exportInvoicePdf')">請求書出力(PDF)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>納品書</h2>
+      <div class="btn-row">
+        <button class="action" data-action="createDelivery" onclick="runSimple('createDelivery')">納品書作成</button>
+      </div>
+      <div class="btn-row">
+        <button class="action secondary" data-action="printDelivery" onclick="runSimple('printDelivery')">納品書印刷</button>
+        <button class="action secondary" data-action="exportDeliveryPdf" onclick="runSimple('exportDeliveryPdf')">納品書出力(PDF)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>最終承認</h2>
+      <div class="btn-row">
+        <button class="action danger" data-action="finalApprove" onclick="openComment('finalApprove','最終承認')">最終承認済み</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>直近の操作履歴</h2>
+      <div id="historyList"></div>
+    </div>
+
+  </div>
+
+  <!-- コメント入力モーダル（完成/承認/差し戻し/最終承認で共通利用） -->
+  <div class="modal-overlay" id="commentModal">
+    <div class="modal-box">
+      <h3 id="commentModalTitle">コメント</h3>
+      <textarea id="commentText" placeholder="コメントがあれば入力してください（任意）"></textarea>
+      <div class="modal-actions">
+        <button class="cancel" onclick="closeComment()">キャンセル</button>
+        <button class="submit" onclick="submitComment()">実行</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="loading-overlay">処理中です…</div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
