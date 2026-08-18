@@ -135,6 +135,7 @@ function buildPdfExportUrl_(fileId, docType) {
   const params = [
     'format=pdf', `gid=${gid}`, 'size=A4', 'portrait=true', 'fitw=true',
     'gridlines=false', 'printtitle=false', 'sheetnames=false',
+    'horizontal_alignment=CENTER', 'vertical_alignment=TOP',
     'top_margin=0.5', 'bottom_margin=0.5', 'left_margin=0.5', 'right_margin=0.5',
   ].join('&');
   return `https://docs.google.com/spreadsheets/d/${fileId}/export?${params}`;
@@ -238,10 +239,12 @@ function exportRangesAsPagedPdfBlob_(fileId, docType, fileName) {
 
     // gid を指定しない = ファイル全体（=全シート）を対象に出力する
     // scale=4 は「ページに合わせる」（幅・高さの両方を1ページに収める）
+    // horizontal_alignment=CENTER で、縮小後の内容が左に寄らず左右均等の余白になる
     const params = [
       'format=pdf', 'size=A4', 'portrait=true', 'scale=4',
       'gridlines=false', 'printtitle=false', 'sheetnames=false',
       'pagenum=UNDEFINED', 'attachment=false',
+      'horizontal_alignment=CENTER', 'vertical_alignment=TOP',
       'top_margin=0.3', 'bottom_margin=0.3', 'left_margin=0.3', 'right_margin=0.3',
     ].join('&');
     const url = `https://docs.google.com/spreadsheets/d/${tempSs.getId()}/export?${params}`;

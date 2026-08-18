@@ -158,23 +158,74 @@ function copyRangeAcrossSpreadsheets_(sourceRange, targetRange) {
  * （スクリプトの閲覧権限があれば取得できるため、ファイルを一般公開する必要も無い）。
  */
 function insertSealImage_(file, cells, docType) {
-  const sealBlob = getSealImageBlob_();
-  if (!sealBlob) return; // 未設定（警告ログ済み）
+  const source = getSealImageSource_();
+  if (!source) return; // 未設定（警告ログ済み）
 
   const sheet = getPrimarySheet_(file, docType);
   const range = sheet.getRange(cells.SEAL_IMAGE_RANGE);
-  const image = sheet.insertImage(sealBlob, range.getColumn(), range.getRow());
+  const image = insertSealBlobWithFallback_(sheet, source, range);
   image.setWidth(SEAL_IMAGE_WIDTH_PX);
   image.setHeight(SEAL_IMAGE_HEIGHT_PX);
   SpreadsheetApp.flush();
 }
 
 /**
- * スクリプトプロパティの設定から社印画像のBlobを取得する。
+ * 社印画像をシートへ挿入する。Sheet.insertImage には「2MB以下・100万画素以下」という
+ * 上限があり、高解像度の社印画像はそのままでは挿入できないため、失敗した場合は
+ * Driveが生成する縮小版（サムネイル）で再挑戦する。
+ * 表示サイズは SEAL_IMAGE_WIDTH_PX 角（既定70px）と小さいため、縮小版でも実用上の
+ * 画質劣化は問題にならない。
+ */
+function insertSealBlobWithFallback_(sheet, source, range) {
+  try {
+    return sheet.insertImage(source.blob, range.getColumn(), range.getRow());
+  } catch (e) {
+    console.warn(`社印画像の直接挿入に失敗したため、縮小版で再試行します: ${e}`);
+    const thumbnail = getSealThumbnailBlob_(source.file);
+    if (!thumbnail) {
+      throw AppError_('SEAL_TOO_LARGE',
+        `社印画像「${source.file.getName()}」は大きすぎて挿入できません`
+        + `（上限: 2MB・100万画素 / 現在: ${Math.round(source.blob.getBytes().length / 1024)}KB）。`
+        + '縮小版の取得にも失敗したため、社印画像そのものを小さいPNG（例: 300x300px程度）に差し替えてください。');
+    }
+    return sheet.insertImage(thumbnail, range.getColumn(), range.getRow());
+  }
+}
+
+/** insertImage の上限を超える社印画像のための、Drive生成の縮小版を取得する */
+function getSealThumbnailBlob_(sealFile) {
+  // Drive API のサムネイル（取得サイズを指定できるため画質を確保しやすい）
+  try {
+    const token = ScriptApp.getOAuthToken();
+    const metaRes = UrlFetchApp.fetch(
+      `https://www.googleapis.com/drive/v3/files/${sealFile.getId()}?fields=thumbnailLink`,
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    if (metaRes.getResponseCode() === 200) {
+      const link = JSON.parse(metaRes.getContentText()).thumbnailLink;
+      if (link) {
+        const sizedLink = link.replace(/=s\d+(-c)?$/, '') + `=s${SEAL_THUMBNAIL_MAX_PX}`;
+        const imgRes = UrlFetchApp.fetch(sizedLink, { muteHttpExceptions: true });
+        if (imgRes.getResponseCode() === 200) return imgRes.getBlob();
+      }
+    }
+  } catch (e) {
+    console.warn(`Driveサムネイルの取得に失敗しました: ${e}`);
+  }
+  // フォールバック: DriveApp の簡易サムネイル（小さめ・サイズ指定不可）
+  try {
+    return sealFile.getThumbnail();
+  } catch (e) {
+    console.warn(`簡易サムネイルの取得にも失敗しました: ${e}`);
+    return null;
+  }
+}
+
+/**
+ * スクリプトプロパティの設定から社印画像のファイルとBlobを取得する。
  * 未設定の場合は null を返す（＝押印をスキップ）。設定されているが取得できない場合は
  * 原因が分かるメッセージで例外を投げる（呼び出し元が操作ログへ記録する）。
  */
-function getSealImageBlob_() {
+function getSealImageSource_() {
   const sealProp = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
   if (!sealProp) {
     console.warn('COMPANY_SEAL_IMAGE_URL が未設定のため、社印画像の挿入をスキップしました。');
@@ -197,7 +248,7 @@ function getSealImageBlob_() {
       `社印に指定されたファイル「${sealFile.getName()}」は画像ではありません（種類: ${mimeType}）。`
       + 'PNGやJPEGなどの画像ファイルを指定してください（Googleスライド・図形描画などは不可）。');
   }
-  return blob;
+  return { file: sealFile, blob: blob };
 }
 
 /**
@@ -213,16 +264,38 @@ function checkSealImageSetting() {
     return;
   }
   try {
-    const blob = getSealImageBlob_();
+    const source = getSealImageSource_();
+    const sizeKb = Math.round(source.blob.getBytes().length / 1024);
+
+    // 実際に一時シートへ挿入してみて、上限（2MB・100万画素）に掛からないか検証する
+    const tempSs = SpreadsheetApp.create(`_tmp_seal_check_${Utilities.getUuid()}`);
+    let insertedVia;
+    try {
+      const tempSheet = tempSs.getSheets()[0];
+      try {
+        tempSheet.insertImage(source.blob, 1, 1);
+        insertedVia = '元の画像をそのまま挿入できます。';
+      } catch (e) {
+        const thumbnail = getSealThumbnailBlob_(source.file);
+        if (!thumbnail) throw e;
+        tempSheet.insertImage(thumbnail, 1, 1);
+        insertedVia = '元の画像は大きすぎるため（上限: 2MB・100万画素）、'
+          + 'Driveが生成する縮小版を自動で使用します。表示サイズが小さいため画質に影響はありません。';
+      }
+    } finally {
+      DriveApp.getFileById(tempSs.getId()).setTrashed(true);
+    }
+
     ui.alert([
       '社印設定の確認: 正常',
       '',
-      `設定値: ${sealProp}`,
-      `種類: ${blob.getContentType()}`,
-      `サイズ: ${blob.getBytes().length} バイト`,
+      `ファイル名: ${source.file.getName()}`,
+      `種類: ${source.blob.getContentType()}`,
+      `ファイルサイズ: ${sizeKb} KB`,
       `貼り付けサイズ: ${SEAL_IMAGE_WIDTH_PX} x ${SEAL_IMAGE_HEIGHT_PX} px`,
       '',
-      '正しく画像として取得できています。承認（納品書は作成）時に押印されます。',
+      insertedVia,
+      '承認（納品書は作成）時に押印されます。',
     ].join('\n'));
   } catch (e) {
     ui.alert(`社印設定の確認: エラー\n\n${e && e.message ? e.message : e}`);
