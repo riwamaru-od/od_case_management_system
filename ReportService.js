@@ -51,7 +51,8 @@ function getCasesByBillingSchedule_(targetLabels) {
   const values = sheet.getRange(CASE_DATA_START_ROW, 1, lastRow - CASE_DATA_START_ROW + 1, CASE_LAST_COL).getValues();
 
   return values
-    .filter(row => targetLabels.indexOf(row[CASE_COLS.BILLING_SCHEDULE - 1]) !== -1)
+    .filter(row => targetLabels.indexOf(row[CASE_COLS.BILLING_SCHEDULE - 1]) !== -1
+      && row[CASE_COLS.STATUS - 1] !== STATUS.CANCELLED)
     .map(row => ({
       caseNo: row[CASE_COLS.CASE_NO - 1],
       clientName: row[CASE_COLS.CLIENT_NAME - 1],

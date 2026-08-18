@@ -122,6 +122,8 @@ const STATUS = {
   INVOICE_DRAFTED: '請求書承認待ち',
   INVOICE_APPROVED: '請求書承認済み',
   FINAL_APPROVED: '最終承認済み',
+  // 案件中止（社員が途中の状態からでも中止できる。中止後は表示用シートから削除する）
+  CANCELLED: '中止',
 };
 
 const BILLING_STATUS = {
@@ -160,8 +162,6 @@ const QUOTE_TEMPLATE_CELLS = {
   APPROVE_COMMENT: 'N57',   // 承認時コメント
   PDF_OUTPUT_BY: 'K58',
   PDF_OUTPUT_AT: 'L58',
-  PRINTED_BY: 'K59',
-  PRINTED_AT: 'L59',
   BODY_COPY_RANGE_FOR_INVOICE: ['B22:E47', 'E49', 'F50', 'F53'], // 請求書へ転記する範囲
 };
 
@@ -178,6 +178,7 @@ const INVOICE_TEMPLATE_CELLS = {
   STAFF_NAME: 'G12',
   STAFF_EMAIL: 'G13',
   SUBJECT: 'C16',
+  QUOTE_SERIAL_REF: 'G53',  // 請求書作成時点の最新の見積書通し番号を「見積書No.xxx」の形式で自動記載
   CREATOR_NAME: 'C56',
   CREATED_AT: 'D56',
   REQUEST_COMMENT: 'F56',
@@ -186,8 +187,6 @@ const INVOICE_TEMPLATE_CELLS = {
   APPROVE_COMMENT: 'F57',
   PDF_OUTPUT_BY: 'C58',
   PDF_OUTPUT_AT: 'D58',
-  PRINTED_BY: 'C59',
-  PRINTED_AT: 'D59',
   BODY_COPY_RANGE_FOR_DELIVERY: ['B22:G47', 'F48:F54', 'E49'], // 納品書へ転記する範囲
 };
 
@@ -204,12 +203,38 @@ const DELIVERY_TEMPLATE_CELLS = {
   STAFF_NAME: 'G12',
   STAFF_EMAIL: 'G13',
   SUBJECT: 'C16',
+  QUOTE_SERIAL_REF: 'G52',   // 納品書作成時点の最新の見積書通し番号を「見積書No.xxx」の形式で自動記載
+  INVOICE_SERIAL_REF: 'G53', // 納品書作成時点の最新の請求書通し番号を「請求書No.xxx」の形式で自動記載
   CREATOR_NAME: 'C56',
   CREATED_AT: 'D56',
   PDF_OUTPUT_BY: 'C57',
   PDF_OUTPUT_AT: 'D57',
-  PRINTED_BY: 'C58',
-  PRINTED_AT: 'D58',
+};
+
+// ------------------------------------------------------------------
+// 社印画像のサイズ（px）。insertSealImage_ が挿入後の画像に明示的に設定する。
+// 見積書・請求書・納品書で共通のサイズを使う。サイズを変更したい場合はここを直接編集する。
+// ------------------------------------------------------------------
+const SEAL_IMAGE_WIDTH_PX = 70;
+const SEAL_IMAGE_HEIGHT_PX = 70;
+
+// ------------------------------------------------------------------
+// PDF出力時のページ範囲（セル指定）。書類種別ごとに「何ページ目に何のセル範囲を
+// 印刷するか」をA1形式で定義する。
+// 注意: Google スプレッドシートのPDFエクスポートAPIは、1回のリクエストで
+// 複数の飛び地レンジを直接指定することができないため、buildPdfExportUrl_ 側で
+// これらのページ範囲すべてを包含する最小の矩形（バウンディングボックス）を
+// エクスポート範囲として指定し、拡大縮小なし（実寸）・ページ順序「右へ、それから下へ」
+// で出力することで、Google側の自動改ページに委ねて実現している。
+// そのため、各テンプレートの列幅・行高が、ここで指定した列・行の境界でちょうど
+// 1ページ分の印刷可能領域（A4・余白0.5inch）に収まっている必要がある。
+// 境界がずれる場合は、各テンプレート側で「ファイル > 印刷設定」から明示的に
+// ページ区切りを設定して調整すること。
+// ------------------------------------------------------------------
+const PDF_PAGE_RANGES = {
+  quote: ['A1:H54', 'I1:P54', 'I55:P58'],
+  invoice: ['A1:H54', 'A55:H58'],
+  delivery: ['A1:H54', 'A55:H58'],
 };
 
 // ------------------------------------------------------------------

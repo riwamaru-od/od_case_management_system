@@ -27,6 +27,13 @@
     </div>
 
     <div class="card">
+      <h2>案件操作</h2>
+      <div class="btn-row">
+        <button class="action danger" data-action="cancelCase" onclick="openComment('cancelCase','案件中止（確認）')">案件中止</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>見積書</h2>
       <div class="btn-row">
         <button class="action" data-action="createQuote" onclick="runSimple('createQuote')">見積書作成</button>
@@ -38,7 +45,6 @@
         <button class="action secondary" data-action="recreateQuote" onclick="runSimple('recreateQuote')">再作成</button>
       </div>
       <div class="btn-row">
-        <button class="action secondary" data-action="printQuote" onclick="runSimple('printQuote')">見積書印刷</button>
         <button class="action secondary" data-action="exportQuotePdf" onclick="runSimple('exportQuotePdf')">見積書出力(PDF)</button>
       </div>
     </div>
@@ -55,7 +61,6 @@
         <button class="action secondary" data-action="recreateInvoice" onclick="runSimple('recreateInvoice')">再作成</button>
       </div>
       <div class="btn-row">
-        <button class="action secondary" data-action="printInvoice" onclick="runSimple('printInvoice')">請求書印刷</button>
         <button class="action secondary" data-action="exportInvoicePdf" onclick="runSimple('exportInvoicePdf')">請求書出力(PDF)</button>
       </div>
     </div>
@@ -66,7 +71,6 @@
         <button class="action" data-action="createDelivery" onclick="runSimple('createDelivery')">納品書作成</button>
       </div>
       <div class="btn-row">
-        <button class="action secondary" data-action="printDelivery" onclick="runSimple('printDelivery')">納品書印刷</button>
         <button class="action secondary" data-action="exportDeliveryPdf" onclick="runSimple('exportDeliveryPdf')">納品書出力(PDF)</button>
       </div>
     </div>

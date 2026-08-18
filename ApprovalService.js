@@ -42,6 +42,14 @@ function completeDocumentForCase_(docTypeKey, caseNo, comment) {
   return withLock_(`${DOC_TYPES[docTypeKey].label}の完成`, () => {
     const docType = DOC_TYPES[docTypeKey];
     const caseInfo = getCaseInfo_(caseNo);
+
+    // 差し戻し後、再作成せずに同じ書類のまま承認依頼を再送することを防ぐ
+    // （差し戻された旧シートは protectSheet_ でロック済みのため、再作成せずに
+    //  書き込もうとするとどのみち失敗するが、ここで明示的に弾いてユーザーへ案内する）
+    if (docType.col.rejectedAt && caseInfo[`${docTypeKey}RejectedAt`]) {
+      throw AppError_('INVALID_STATE', `差し戻し後は「再作成」を行ってから${docType.label}の完成（承認依頼）を行ってください。`);
+    }
+
     const email = getActiveUserEmail_();
     const staff = findStaffByEmail_(email);
     const now = new Date();
@@ -117,6 +125,14 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
       moveCaseDocFolderToStage_(docType, caseInfo, 'created', 'billed');
     }
 
+    // このファイルへの書き込みが全て完了した後で、ファイル編集権限を降格する
+    // （降格を先に行うと、後続の書き込み・フォルダ移動が実行者自身の権限不足で失敗しうるため）
+    try {
+      restrictFileEditAccessToAdminOnly_(file);
+    } catch (e) {
+      console.warn(`ファイル編集権限の降格に失敗しました: ${e}`);
+    }
+
     // 作成者へ通知
     const creatorStaff = getAllStaff_().find(s => s.name === caseInfo[`${docTypeKey}Creator`]);
     const notifyMsg = buildApprovedMessage_(docType.label, {
@@ -151,6 +167,11 @@ function rejectDocumentForCase_(docTypeKey, caseNo, comment) {
       protectSheet_(sheet);
     } catch (e) {
       console.warn(`シート保護(protectSheet_)の適用に失敗しました: ${e}`);
+    }
+    try {
+      restrictFileEditAccessToAdminOnly_(file);
+    } catch (e) {
+      console.warn(`ファイル編集権限の降格に失敗しました: ${e}`);
     }
 
     const fieldUpdates = { [CASE_COLS.STATUS]: docType.status.inProgress };
@@ -193,40 +214,11 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
   }, caseNo);
 }
 
-/** 印刷（PDFプレビューを新規タブで開く用のURLを返す。印刷者/印刷日時をテンプレートへ記録） */
-function printDocumentForCase_(docTypeKey, caseNo) {
-  return withLock_(`${DOC_TYPES[docTypeKey].label}の印刷`, () => {
-    const docType = DOC_TYPES[docTypeKey];
-    const caseInfo = getCaseInfo_(caseNo);
-    const email = getActiveUserEmail_();
-    const staff = findStaffByEmail_(email);
-    const now = new Date();
-
-    const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
-    const file = DriveApp.getFileById(fileId);
-    const sheet = getPrimarySheet_(file, docType);
-    const cells = docType.cells();
-    setCellValue_(sheet, cells.PRINTED_BY, staff ? staff.name : email);
-    setCellValue_(sheet, cells.PRINTED_AT, formatDateTime_(now));
-
-    if (docType.col.outputBy) {
-      setCaseFields_(caseNo, {
-        [docType.col.outputBy]: staff ? staff.name : email,
-        [docType.col.outputAt]: formatDateTime_(now),
-      });
-    }
-
-    if (docTypeKey === 'invoice' || docTypeKey === 'delivery') {
-      markBillingCompletedIfApplicable_(caseNo);
-    }
-
-    appendOperationLog_(caseNo, `${docType.label}印刷`, '', false);
-
-    return { printUrl: getPrintPreviewUrl_(fileId, docType) };
-  }, caseNo);
-}
-
-/** PDF出力: PDFを保存フォルダへ書き出し、リンクをシートへ記録する */
+/**
+ * PDF出力: PDFを保存フォルダへ書き出し、リンクをシートへ記録する。
+ * 出力操作はこの「PDF出力」に統一されている（旧「印刷」機能は廃止）。
+ * 挙動: ドライブへPDFを保存 → 呼び出し元（クライアント側）が返却されたURLを新規タブで開く。
+ */
 function exportDocumentPdfForCase_(docTypeKey, caseNo) {
   return withLock_(`${DOC_TYPES[docTypeKey].label}のPDF出力`, () => {
     const docType = DOC_TYPES[docTypeKey];
@@ -265,7 +257,7 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
 }
 
 /**
- * 請求書・納品書の「印刷」または「PDF出力」のいずれかが実行された時点で、
+ * 請求書・納品書の「PDF出力」が実行された時点で、
  * 請求ステータスを「請求済み」に変更し、最終承認ボタンを有効化する
  * （サイドバー側はステータス文字列を見て活性/非活性を判断するため、ここでは
  *  ステータス更新のみ行う）。

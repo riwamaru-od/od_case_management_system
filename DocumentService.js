@@ -8,7 +8,7 @@
  *
  * 命名規則:
  *   案件ごとに専用フォルダ「{案件番号}_{案件名}」を、書類種別のステージフォルダ配下に作る。
- *   その中に書類ファイルを「{書類種別}_最新」という名前で1つだけ作成し（初回作成時のみ）、
+ *   その中に書類ファイルを「{案件番号}_{書類種別}」という名前で1つだけ作成し（初回作成時のみ）、
  *   以降の再作成はこのファイルの中に新しいシートを複製して積み重ねていく。
  *   ファイル内では、現行版のシートを「{書類種別}_最新」、退避された旧版のシートを
  *   「{書類種別}_v{枝番}_{yyyyMMdd}」という名前で保持する（旧版シートは protectSheet_ でロック）。
@@ -29,13 +29,15 @@ function getCaseDocFolder_(docType, caseInfo, stage) {
 }
 
 /**
- * テンプレートをコピーして「{書類種別}_最新」という名前の新規ファイルを作る（初回作成時のみ）。
+ * テンプレートをコピーして「{案件番号}_{書類種別}」という名前の新規ファイルを作る（初回作成時のみ）。
+ * このファイル名（スプレッドシートのタイトル）はファイル自体が存続する限り変わらない
+ * （再作成してもファイルは同一のまま、中のシートだけが積み重なっていくため）。
  * 生成直後にファイルオーナーを管理用アカウントへ移譲する（protectSheet_ の実効性を担保するため）。
  */
 function createLatestDocument_(docType, caseInfo, stage) {
   const folder = getCaseDocFolder_(docType, caseInfo, stage);
   const templateFile = DriveApp.getFileById(docType.getTemplateFileId());
-  const newFile = templateFile.makeCopy(`${docType.label}${LATEST_SUFFIX}`, folder);
+  const newFile = templateFile.makeCopy(`${caseInfo.caseNo}_${docType.label}`, folder);
 
   const sheet = SpreadsheetApp.openById(newFile.getId()).getSheets()[0];
   sheet.setName(`${docType.label}${LATEST_SUFFIX}`);
@@ -76,6 +78,10 @@ function recreateLatestDocument_(docType, caseInfo) {
   } catch (e) {
     console.warn(`旧シートの保護(protectSheet_)の適用に失敗しました: ${e}`);
   }
+  // 注意: ファイル編集権限の降格(restrictFileEditAccessToAdminOnly_)はここでは行わない。
+  // このファイルには直後に呼び出し元が新シートへデータ転記を行うため、ここで降格すると
+  // 実行者自身がその書き込みに失敗する。降格は呼び出し元（recreateDocumentForCase_）側で
+  // データ転記が完了した後に行う。
 
   newSheet.setName(`${docType.label}${LATEST_SUFFIX}`);
   ss.setActiveSheet(newSheet);
@@ -118,33 +124,64 @@ function moveFileOrFolder_(item, destinationFolder) {
   }
 }
 
+/** 列名（A, B, ..., Z, AA, ...）を1始まりの列番号に変換する */
+function columnLetterToIndex_(letters) {
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) {
+    n = n * 26 + (letters.charCodeAt(i) - 64);
+  }
+  return n;
+}
+
+/** "A1:H54" のようなA1形式のセル範囲を、0始まり・終端排他のr1/c1/r2/c2に変換する */
+function parseA1Range_(a1) {
+  const m = String(a1).match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+  if (!m) {
+    throw AppError_('INVALID_RANGE', `PDF出力範囲の指定が不正です: ${a1}`);
+  }
+  return {
+    c1: columnLetterToIndex_(m[1]) - 1,
+    r1: Number(m[2]) - 1,
+    c2: columnLetterToIndex_(m[3]), // 終端は排他的（=1始まりの終端列番号そのもの）
+    r2: Number(m[4]),
+  };
+}
+
+/** 複数のA1形式レンジを包含する最小の矩形（バウンディングボックス）を求める */
+function computeBoundingBoxFromRanges_(a1Ranges) {
+  const boxes = a1Ranges.map(parseA1Range_);
+  return boxes.reduce((acc, b) => ({
+    r1: Math.min(acc.r1, b.r1),
+    c1: Math.min(acc.c1, b.c1),
+    r2: Math.max(acc.r2, b.r2),
+    c2: Math.max(acc.c2, b.c2),
+  }));
+}
+
 /**
  * PDF書き出し用URLを組み立てる共通ヘルパー。
- * 印刷範囲・改ページ位置（見積書=1〜3ページ、請求書/納品書=1〜2ページ）は
- * 各テンプレート側であらかじめ「ファイル > 印刷設定」で設定しておく前提とし、
- * ここでは対象シート（現行の「最新」シート, gid）とA4・余白などの共通パラメータのみ指定する。
- * docType を渡さない場合は後方互換として1枚目のシートを対象にする。
+ * 印刷範囲は Constants.js の PDF_PAGE_RANGES（書類種別ごとのセル指定）から
+ * バウンディングボックスを算出して指定し、拡大縮小なし・ページ順序「右へ、それから下へ」で
+ * Google側の自動改ページに委ねる（PDF_PAGE_RANGES 冒頭のコメント参照）。
+ * docType を渡さない場合は後方互換として1枚目のシート・範囲指定なしで出力する。
  */
 function buildPdfExportUrl_(fileId, docType) {
   const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
   const gid = sheet.getSheetId();
   const params = [
-    'format=pdf', `gid=${gid}`, 'size=A4', 'portrait=true', 'fitw=true',
+    'format=pdf', `gid=${gid}`, 'size=A4', 'portrait=true',
+    'fitw=false', 'fith=false', 'pageorder=2',
     'gridlines=false', 'printtitle=false', 'sheetnames=false',
     'top_margin=0.5', 'bottom_margin=0.5', 'left_margin=0.5', 'right_margin=0.5',
-  ].join('&');
-  return `https://docs.google.com/spreadsheets/d/${fileId}/export?${params}`;
-}
+  ];
 
-/**
- * 印刷用URL（新規タブで開く想定）。
- * 注意: ブラウザのセキュリティ上、別タブ（別オリジン）のウィンドウに対して
- * こちら側のスクリプトから window.print() を強制実行することはできない。
- * そのため実装としては「PDFプレビュー（ブラウザ内蔵ビューア）」を新規タブで開き、
- * ビューア右上の印刷アイコンからそのまま印刷できる状態にする。
- */
-function getPrintPreviewUrl_(fileId, docType) {
-  return buildPdfExportUrl_(fileId, docType);
+  const pageRanges = docType && PDF_PAGE_RANGES[docType.key];
+  if (pageRanges && pageRanges.length) {
+    const box = computeBoundingBoxFromRanges_(pageRanges);
+    params.push(`r1=${box.r1}`, `r2=${box.r2}`, `c1=${box.c1}`, `c2=${box.c2}`);
+  }
+
+  return `https://docs.google.com/spreadsheets/d/${fileId}/export?${params.join('&')}`;
 }
 
 /** 指定ファイルをPDFとして書き出し、指定フォルダへ保存する */
