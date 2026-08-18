@@ -150,16 +150,25 @@ function copyRangeAcrossSpreadsheets_(sourceRange, targetRange) {
  * 社印画像を指定範囲へ挿入する（G8:G13相当。見積書・請求書は承認時、納品書は作成時に呼ぶ）。
  * サイズは Constants.js の SEAL_IMAGE_WIDTH_PX / SEAL_IMAGE_HEIGHT_PX で明示的に指定する
  * （画像素材そのものの解像度に依存させないため）。社印サイズを変更したい場合はその2つの値を編集する。
+ *
+ * COMPANY_SEAL_IMAGE_URL には、Googleドライブの通常の共有リンク
+ * （例: https://drive.google.com/file/d/xxxxx/view?usp=sharing）をそのまま設定してよい。
+ * このURLはHTMLのプレビュー画面を返すため画像として直接フェッチすることはできない。
+ * そのため URL からファイルIDを取り出し、DriveApp 経由で画像データそのものを取得して挿入する
+ * （スクリプトの閲覧権限があれば取得できるため、ファイルを一般公開する必要も無い）。
  */
 function insertSealImage_(file, cells, docType) {
-  const sealUrl = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
-  if (!sealUrl) {
+  const sealProp = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
+  if (!sealProp) {
     console.warn('COMPANY_SEAL_IMAGE_URL が未設定のため、社印画像の挿入をスキップしました。');
     return;
   }
+  const sealFileId = extractFileIdFromUrl_(sealProp);
+  const sealBlob = DriveApp.getFileById(sealFileId).getBlob();
+
   const sheet = getPrimarySheet_(file, docType);
   const range = sheet.getRange(cells.SEAL_IMAGE_RANGE);
-  const image = sheet.insertImage(sealUrl, range.getColumn(), range.getRow());
+  const image = sheet.insertImage(sealBlob, range.getColumn(), range.getRow());
   image.setWidth(SEAL_IMAGE_WIDTH_PX);
   image.setHeight(SEAL_IMAGE_HEIGHT_PX);
 }

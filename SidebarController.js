@@ -126,6 +126,24 @@ function computeButtonStates_(caseInfo, email) {
 
   const b = (enabled, reason) => ({ enabled: !!enabled, reason: enabled ? '' : (reason || '') });
 
+  // 最終承認済み・中止済みの案件は表示用シートから削除済みで、全案件DBの履歴閲覧用に
+  // getCaseInfo_ が拾ってきているだけの状態。書き込み系の関数はUIシートのみを対象と
+  // しているため、誤操作防止のため全ボタンを一律非活性にする（閲覧専用）。
+  const isClosed = s === STATUS.FINAL_APPROVED || s === STATUS.CANCELLED;
+  if (isClosed) {
+    const closedReason = s === STATUS.CANCELLED ? 'この案件は中止済みです' : 'この案件は最終承認済みで終了しています';
+    const disabled = b(false, closedReason);
+    return {
+      createQuote: disabled, completeQuote: disabled, approveQuote: disabled, rejectQuote: disabled,
+      recreateQuote: disabled, exportQuotePdf: disabled,
+      createInvoice: disabled, completeInvoice: disabled, approveInvoice: disabled, rejectInvoice: disabled,
+      recreateInvoice: disabled, exportInvoicePdf: disabled,
+      createDelivery: disabled, exportDeliveryPdf: disabled,
+      cancelCase: disabled,
+      finalApprove: disabled,
+    };
+  }
+
   return {
     createQuote: b(!caseInfo.quoteLink, '既に見積書が作成されています'),
     // 差し戻し後は「再作成」を行うまで、同じ書類のまま完成（承認依頼）を再送できないようにする

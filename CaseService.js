@@ -48,17 +48,28 @@ function handleCaseRowEdit_(sheet, row) {
 }
 
 /**
- * UIシートから案件情報を読み取る（UID管理の正式な読み取り元）。
+ * 案件情報を読み取る（UID管理の正式な読み取り元）。
  * getMainSpreadsheet_() 経由で取得したシートを使い、
  * SpreadsheetApp.getActiveSheet() には一切依存しない。
+ * まずメイン画面UIシートから探し、見つからなければ全案件DBシートを探す
+ * （最終承認・案件中止済みの案件はUIシートから削除済みだが、全案件DBには残っているため。
+ * サイドバー側はこれにより、終了済みの案件でも履歴閲覧ができる。書き込み系の関数
+ * （setCaseFields_ 等）はUIシートのみを対象とするため、終了済み案件への誤操作は
+ * computeButtonStates_ 側で全ボタンを非活性にすることで防ぐ）。
  */
 function getCaseInfo_(caseNo) {
   const uiSheet = getActiveUiSheet_();
-  const row = findRowByCaseNo_(uiSheet, caseNo);
+  let sheet = uiSheet;
+  let row = findRowByCaseNo_(uiSheet, caseNo);
+  if (!row) {
+    const dbSheet = getActiveDbSheet_();
+    row = findRowByCaseNo_(dbSheet, caseNo);
+    sheet = dbSheet;
+  }
   if (!row) {
     throw AppError_('CASE_NOT_FOUND', `案件番号「${caseNo}」が見つかりません。`);
   }
-  const v = uiSheet.getRange(row, 1, 1, CASE_LAST_COL).getValues()[0];
+  const v = sheet.getRange(row, 1, 1, CASE_LAST_COL).getValues()[0];
    const formatCell = val => {
     if (val instanceof Date) return formatDateTime_(val);
     return val == null ? '' : String(val);

@@ -16,7 +16,11 @@ const PROP_KEYS = {
   QUOTE_TEMPLATE_FILE_ID: 'QUOTE_TEMPLATE_FILE_ID', // 見積書テンプレート（スプレッドシート）
   INVOICE_TEMPLATE_FILE_ID: 'INVOICE_TEMPLATE_FILE_ID',
   DELIVERY_TEMPLATE_FILE_ID: 'DELIVERY_TEMPLATE_FILE_ID',
-  COMPANY_SEAL_IMAGE_URL: 'COMPANY_SEAL_IMAGE_URL', // 承認後に貼り付ける社印画像（Drive直リンク等）
+  // 承認後（納品書は作成時）に貼り付ける社印画像。Googleドライブの通常の共有リンク
+  // （https://drive.google.com/file/d/xxxxx/view?usp=sharing 形式）をそのまま設定してよい。
+  // スクリプトがファイルIDを抽出してDriveApp経由で画像を取得するため、一般公開設定は不要
+  // （実行者がそのファイルを閲覧できる権限を持っていればよい）。
+  COMPANY_SEAL_IMAGE_URL: 'COMPANY_SEAL_IMAGE_URL',
   CHATWORK_API_TOKEN: 'CHATWORK_API_TOKEN',         // Chatwork APIトークン
   // GASのインストール型トリガー（installTriggers()）を設定している管理用Googleアカウントの
   // メールアドレス。書類ファイルのオーナーをこのアカウントへ統一することで、シート保護

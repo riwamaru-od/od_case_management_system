@@ -125,11 +125,8 @@ function moveFileOrFolder_(item, destinationFolder) {
 }
 
 /**
- * PDF書き出し用URLを組み立てる共通ヘルパー。
- * 印刷範囲・改ページ位置（見積書=1〜3ページ、請求書/納品書=1〜2ページ。
- * Constants.js 末尾のコメント参照）は各テンプレート側であらかじめ
- * 「ファイル > 印刷設定」で手動設定しておく前提とし、ここでは対象シート
- * （現行の「最新」シート、gid）とA4・余白などの共通パラメータのみ指定する。
+ * PDF書き出し用URLを組み立てる共通ヘルパー（PDF_PAGE_RANGES が未定義の書類種別向けの
+ * フォールバック。対象シート全体を1ページとして書き出す）。
  * docType を渡さない場合は後方互換として1枚目のシートを対象にする。
  */
 function buildPdfExportUrl_(fileId, docType) {
@@ -143,14 +140,111 @@ function buildPdfExportUrl_(fileId, docType) {
   return `https://docs.google.com/spreadsheets/d/${fileId}/export?${params}`;
 }
 
+/** 列名（A, B, ..., Z, AA, ...）を1始まりの列番号に変換する */
+function columnLetterToIndex_(letters) {
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) {
+    n = n * 26 + (letters.charCodeAt(i) - 64);
+  }
+  return n;
+}
+
+/** "A1:H54" のようなA1形式のセル範囲を、0始まり・終端排他のr1/c1/r2/c2に変換する */
+function parseA1Range_(a1) {
+  const m = String(a1).match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+  if (!m) {
+    throw AppError_('INVALID_RANGE', `PDF出力範囲の指定が不正です: ${a1}`);
+  }
+  return {
+    c1: columnLetterToIndex_(m[1]) - 1,
+    r1: Number(m[2]) - 1,
+    c2: columnLetterToIndex_(m[3]), // 終端は排他的（=1始まりの終端列番号そのもの）
+    r2: Number(m[4]),
+  };
+}
+
+/**
+ * 指定したA1形式のセル範囲1つを、1ページ（A4）に収まるPNG画像として書き出す。
+ * fitw/fith を両方trueにすることで、この範囲単体が確実に1ページへ収まるようにする。
+ */
+function exportRangeAsPngBlob_(fileId, docType, a1Range) {
+  const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
+  const gid = sheet.getSheetId();
+  const box = parseA1Range_(a1Range);
+  const params = [
+    'format=png', `gid=${gid}`,
+    `r1=${box.r1}`, `r2=${box.r2}`, `c1=${box.c1}`, `c2=${box.c2}`,
+    'size=A4', 'portrait=true', 'fitw=true', 'fith=true',
+    'gridlines=false', 'printtitle=false', 'sheetnames=false',
+    'top_margin=0.3', 'bottom_margin=0.3', 'left_margin=0.3', 'right_margin=0.3',
+  ].join('&');
+  const url = `https://docs.google.com/spreadsheets/d/${fileId}/export?${params}`;
+  const token = ScriptApp.getOAuthToken();
+  const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  if (response.getResponseCode() !== 200) {
+    throw AppError_('PDF_EXPORT_FAILED', buildUserErrorMessage_('PDF出力', 'E102'));
+  }
+  return response.getBlob();
+}
+
+const PDF_PAGE_WIDTH_PT = 595;  // A4 幅（ポイント）
+const PDF_PAGE_HEIGHT_PT = 842; // A4 高さ（ポイント）
+
+/**
+ * 複数の画像を、Googleスライドを介して1枚ずつのページとして結合し、PDFのBlobとして返す。
+ * Apps ScriptにはネイティブなPDF結合機能が無いため、一時的なスライドを作成して
+ * 各画像をA4サイズのスライド1枚ずつに敷き詰め、プレゼンテーション全体をPDF書き出し
+ * することで実現している（結果、PDF内の文字は画像化され検索・コピー不可になる点に注意）。
+ * 一時スライドは書き出し後にゴミ箱へ移動する。
+ */
+function mergeImagesIntoPdfBlob_(imageBlobs, fileName) {
+  const presentation = SlidesApp.create(`_tmp_pdf_merge_${Utilities.getUuid()}`);
+  try {
+    presentation.setPageSize(PDF_PAGE_WIDTH_PT, PDF_PAGE_HEIGHT_PT);
+    const originalFirstSlide = presentation.getSlides()[0];
+
+    imageBlobs.forEach(blob => {
+      const slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+      slide.insertImage(blob, 0, 0, PDF_PAGE_WIDTH_PT, PDF_PAGE_HEIGHT_PT);
+    });
+    originalFirstSlide.remove();
+    presentation.saveAndClose();
+
+    const url = `https://docs.google.com/presentation/d/${presentation.getId()}/export/pdf`;
+    const token = ScriptApp.getOAuthToken();
+    const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) {
+      throw AppError_('PDF_EXPORT_FAILED', buildUserErrorMessage_('PDF出力', 'E104'));
+    }
+    return response.getBlob().setName(`${fileName}.pdf`);
+  } finally {
+    DriveApp.getFileById(presentation.getId()).setTrashed(true);
+  }
+}
+
+/** PDF_PAGE_RANGES に定義された各ページ範囲を1ページずつ書き出し、1つのPDFへ合成する */
+function exportRangesAsMergedPdf_(fileId, docType, fileName) {
+  const pageRanges = PDF_PAGE_RANGES[docType.key];
+  const imageBlobs = pageRanges.map(a1Range => exportRangeAsPngBlob_(fileId, docType, a1Range));
+  return mergeImagesIntoPdfBlob_(imageBlobs, fileName);
+}
+
 /** 指定ファイルをPDFとして書き出し、指定フォルダへ保存する */
 function exportFileToPdf_(fileId, folder, fileName, docType) {
+  const pageRanges = docType && PDF_PAGE_RANGES[docType.key];
+  const blob = (pageRanges && pageRanges.length)
+    ? exportRangesAsMergedPdf_(fileId, docType, fileName)
+    : exportWholeSheetAsPdfBlob_(fileId, docType, fileName);
+  return folder.createFile(blob);
+}
+
+/** PDF_PAGE_RANGES が無い書類種別向けのフォールバック: シート全体を1ページとして書き出す */
+function exportWholeSheetAsPdfBlob_(fileId, docType, fileName) {
   const url = buildPdfExportUrl_(fileId, docType);
   const token = ScriptApp.getOAuthToken();
   const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
   if (response.getResponseCode() !== 200) {
     throw AppError_('PDF_EXPORT_FAILED', buildUserErrorMessage_('PDF出力', 'E101'));
   }
-  const blob = response.getBlob().setName(`${fileName}.pdf`);
-  return folder.createFile(blob);
+  return response.getBlob().setName(`${fileName}.pdf`);
 }
