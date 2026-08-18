@@ -144,7 +144,9 @@ const QUOTE_TEMPLATE_CELLS = {
   CONTACT_NAME: 'B11',      // 末尾に「様」を付けて記載
   CASE_NO: 'G1',
   SERIAL_NO: 'G6',          // この期の見積書通し番号（再作成時も新規採番）
-  SEAL_IMAGE_RANGE: 'G8:G13', // 承認後、社印画像を挿入
+  // 承認後に社印画像を挿入する位置（このセルの左上が基準。実際の位置は
+  // SEAL_IMAGE_OFFSET_X_PX / SEAL_IMAGE_OFFSET_Y_PX で微調整する）
+  SEAL_IMAGE_RANGE: 'G4',
   STAFF_NAME: 'G12',
   STAFF_EMAIL: 'G13',
   SUBJECT: 'C16',
@@ -174,7 +176,7 @@ const INVOICE_TEMPLATE_CELLS = {
   CONTACT_NAME: 'B11',
   CASE_NO: 'G1',
   SERIAL_NO: 'G6',          // この期の請求書通し番号（再作成時も新規採番）
-  SEAL_IMAGE_RANGE: 'G8:G13',
+  SEAL_IMAGE_RANGE: 'G4', // 社印を挿入する基準セル（見積書と同じ扱い）
   STAFF_NAME: 'G12',
   STAFF_EMAIL: 'G13',
   SUBJECT: 'C16',
@@ -199,7 +201,7 @@ const DELIVERY_TEMPLATE_CELLS = {
   CONTACT_NAME: 'B11',
   CASE_NO: 'G1',
   SERIAL_NO: 'G6',          // この期の納品書通し番号（再作成時も新規採番）
-  SEAL_IMAGE_RANGE: 'G8:G13',
+  SEAL_IMAGE_RANGE: 'G4', // 社印を挿入する基準セル（見積書と同じ扱い）
   STAFF_NAME: 'G12',
   STAFF_EMAIL: 'G13',
   SUBJECT: 'C16',
@@ -212,15 +214,21 @@ const DELIVERY_TEMPLATE_CELLS = {
 };
 
 // ------------------------------------------------------------------
-// 社印画像のサイズ（px）。insertSealImage_ が挿入後の画像に明示的に設定する。
-// 見積書・請求書・納品書で共通のサイズを使う。サイズを変更したい場合はここを直接編集する。
+// 社印画像の表示サイズ（px）。insertSealImage_ が挿入後の画像に明示的に設定する。
+// 見積書・請求書・納品書で共通。サイズを変更したい場合はこの2つの値を編集する。
 // ------------------------------------------------------------------
-const SEAL_IMAGE_WIDTH_PX = 70;
-const SEAL_IMAGE_HEIGHT_PX = 70;
+const SEAL_IMAGE_WIDTH_PX = 150;
+const SEAL_IMAGE_HEIGHT_PX = 150;
+
+// 社印の貼り付け位置の微調整（px）。各テンプレートの *_TEMPLATE_CELLS.SEAL_IMAGE_RANGE で
+// 指定したセルの左上を基準に、この分だけ右・下へずらして配置する。
+// 「もう少し右へ」ならX、「もう少し下へ」ならYの値を増やす（負の値も指定可）。
+const SEAL_IMAGE_OFFSET_X_PX = 60;
+const SEAL_IMAGE_OFFSET_Y_PX = 5;
 
 // Sheet.insertImage には「2MB以下・100万画素以下」という上限があり、高解像度の
 // 社印画像はそのままでは挿入できない。その場合に使うDrive生成の縮小版の最大辺（px）。
-// 表示サイズ（上記70px角）に対して十分な解像度を確保しつつ、上限に掛からない値にする。
+// 表示サイズ（上記150px角）に対して十分な解像度を確保しつつ、上限に掛からない値にする。
 const SEAL_THUMBNAIL_MAX_PX = 600;
 
 // ------------------------------------------------------------------

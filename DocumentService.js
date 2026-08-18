@@ -84,6 +84,13 @@ function recreateLatestDocument_(docType, caseInfo) {
   // データ転記が完了した後に行う。
 
   newSheet.setName(`${docType.label}${LATEST_SUFFIX}`);
+  // 複製直後の新シートは「未承認の新しいドラフト」なので、旧版から引き継がれた
+  // 社印を取り除く（再承認時に改めて押印される）
+  try {
+    removeSealImages_(newSheet, newSheet.getRange(docType.cells().SEAL_IMAGE_RANGE));
+  } catch (e) {
+    console.warn(`複製シートからの社印除去に失敗しました: ${e}`);
+  }
   ss.setActiveSheet(newSheet);
   ss.moveActiveSheet(1);
 

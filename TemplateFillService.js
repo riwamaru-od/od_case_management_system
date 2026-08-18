@@ -163,10 +163,12 @@ function insertSealImage_(file, cells, docType) {
 
   const sheet = getPrimarySheet_(file, docType);
   const range = sheet.getRange(cells.SEAL_IMAGE_RANGE);
+  removeSealImages_(sheet, range); // 再承認時などに二重で押印されないようにする
   const image = insertSealBlobWithFallback_(sheet, source, range);
   image.setWidth(SEAL_IMAGE_WIDTH_PX);
   image.setHeight(SEAL_IMAGE_HEIGHT_PX);
   SpreadsheetApp.flush();
+  return image;
 }
 
 /**
@@ -177,8 +179,10 @@ function insertSealImage_(file, cells, docType) {
  * 画質劣化は問題にならない。
  */
 function insertSealBlobWithFallback_(sheet, source, range) {
+  const col = range.getColumn();
+  const row = range.getRow();
   try {
-    return sheet.insertImage(source.blob, range.getColumn(), range.getRow());
+    return sheet.insertImage(source.blob, col, row, SEAL_IMAGE_OFFSET_X_PX, SEAL_IMAGE_OFFSET_Y_PX);
   } catch (e) {
     console.warn(`社印画像の直接挿入に失敗したため、縮小版で再試行します: ${e}`);
     const thumbnail = getSealThumbnailBlob_(source.file);
@@ -188,8 +192,21 @@ function insertSealBlobWithFallback_(sheet, source, range) {
         + `（上限: 2MB・100万画素 / 現在: ${Math.round(source.blob.getBytes().length / 1024)}KB）。`
         + '縮小版の取得にも失敗したため、社印画像そのものを小さいPNG（例: 300x300px程度）に差し替えてください。');
     }
-    return sheet.insertImage(thumbnail, range.getColumn(), range.getRow());
+    return sheet.insertImage(thumbnail, col, row, SEAL_IMAGE_OFFSET_X_PX, SEAL_IMAGE_OFFSET_Y_PX);
   }
+}
+
+/**
+ * 社印の基準セルに貼られている既存の画像を取り除く。
+ * 再承認時の二重押印や、再作成で複製されたシートに旧版の社印が残るのを防ぐ。
+ */
+function removeSealImages_(sheet, range) {
+  const col = range.getColumn();
+  const row = range.getRow();
+  sheet.getImages().forEach(img => {
+    const anchor = img.getAnchorCell();
+    if (anchor.getColumn() === col && anchor.getRow() === row) img.remove();
+  });
 }
 
 /** insertImage の上限を超える社印画像のための、Drive生成の縮小版を取得する */
