@@ -61,14 +61,23 @@ function api_getSidebarData(preferredCaseNo) {
   return base;
 }
 
-/** アクティブなUIシート上で、現在選択されているセルの行から案件番号を取得する */
+/**
+ * アクティブなUIシート、または全案件DBシート上で、現在選択されているセルの行から
+ * 案件番号を取得する（全案件DBとメイン画面UIは同一列構成 - Constants.js参照のため
+ * CASE_COLS.CASE_NO の列番号をそのまま使い回せる）。
+ */
 function getSelectedCaseNo_() {
   try {
     const ss = getMainSpreadsheet_();
     const activeUiSheet = getActiveUiSheet_();
+    const activeDbSheet = getActiveDbSheet_();
     const activeSheet = ss.getActiveSheet();
-    // UIシート以外が選択されている場合はnullを返す
-    if (!activeSheet || activeSheet.getSheetId() !== activeUiSheet.getSheetId()) return null;
+    // UIシート・全案件DBシート以外が選択されている場合はnullを返す
+    const isUiOrDbSheet = !!activeSheet && (
+      activeSheet.getSheetId() === activeUiSheet.getSheetId()
+      || activeSheet.getSheetId() === activeDbSheet.getSheetId()
+    );
+    if (!isUiOrDbSheet) return null;
 
     const row = ss.getActiveRange() && ss.getActiveRange().getRow();
     if (!row || row < CASE_DATA_START_ROW) return null;
@@ -109,7 +118,10 @@ function computeButtonStates_(caseInfo, email) {
     completeQuote: b(s === STATUS.QUOTE_IN_PROGRESS && !!caseInfo.quoteLink, '見積書作成中の案件のみ操作できます'),
     approveQuote: b(isQuoteDrafted && canApproveQuote, !isQuoteDrafted ? '承認待ちの状態ではありません' : '見積書承認の権限がありません'),
     rejectQuote: b(isQuoteDrafted && canApproveQuote, !isQuoteDrafted ? '承認待ちの状態ではありません' : '見積書承認の権限がありません'),
-    recreateQuote: b(isQuoteDrafted && canApproveQuote, !isQuoteDrafted ? '承認待ちの状態ではありません' : '見積書承認の権限がありません'),
+    // 再作成は「差し戻し後」または「承認後」のみ活性化する（承認待ち＝作成直後の作成中と区別するため
+    // quoteRejectedAt フラグを利用する。Constants.js/CASE_COLS.QUOTE_REJECTED_AT 参照）
+    recreateQuote: b((!!caseInfo.quoteRejectedAt || s === STATUS.QUOTE_APPROVED) && canApproveQuote,
+      (!caseInfo.quoteRejectedAt && s !== STATUS.QUOTE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '見積書承認の権限がありません'),
 
     printQuote: b(s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt, '見積書承認済み以降のみ操作できます'),
     exportQuotePdf: b(s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt, '見積書承認済み以降のみ操作できます'),
@@ -118,7 +130,8 @@ function computeButtonStates_(caseInfo, email) {
     completeInvoice: b(s === STATUS.INVOICE_IN_PROGRESS && !!caseInfo.invoiceLink, '請求書作成中の案件のみ操作できます'),
     approveInvoice: b(isInvoiceDrafted && canApproveInvoice, !isInvoiceDrafted ? '承認待ちの状態ではありません' : '請求書承認の権限がありません'),
     rejectInvoice: b(isInvoiceDrafted && canApproveInvoice, !isInvoiceDrafted ? '承認待ちの状態ではありません' : '請求書承認の権限がありません'),
-    recreateInvoice: b(isInvoiceDrafted && canApproveInvoice, !isInvoiceDrafted ? '承認待ちの状態ではありません' : '請求書承認の権限がありません'),
+    recreateInvoice: b((!!caseInfo.invoiceRejectedAt || s === STATUS.INVOICE_APPROVED) && canApproveInvoice,
+      (!caseInfo.invoiceRejectedAt && s !== STATUS.INVOICE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '請求書承認の権限がありません'),
 
     printInvoice: b(!!caseInfo.invoiceApprovedAt, '請求書承認済み以降のみ操作できます'),
     exportInvoicePdf: b(!!caseInfo.invoiceApprovedAt, '請求書承認済み以降のみ操作できます'),

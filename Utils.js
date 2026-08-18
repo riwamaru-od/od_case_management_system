@@ -29,7 +29,7 @@ function buildUserErrorMessage_(actionLabel, errorCode) {
  * 例外発生時は呼び出し元で「実行前の状態に戻す」ため、fn 内部の副作用は
  * 「全て検証してから書き込む」設計にすること（部分的な書き込み禁止）。
  */
-function withLock_(actionLabel, fn) {
+function withLock_(actionLabel, fn, caseNo) {
   const lock = LockService.getScriptLock();
   const acquired = lock.tryLock(10000); // 10秒待って取得できなければタイムアウト
   if (!acquired) {
@@ -41,6 +41,11 @@ function withLock_(actionLabel, fn) {
     if (e && e.name === 'AppError') throw e;
     console.error(`[${actionLabel}] Unexpected error: ${e && e.stack ? e.stack : e}`);
     const detail = e && e.message ? ` [詳細: ${e.message}]` : '';
+    try {
+      appendOperationLog_(caseNo || '', actionLabel, e && e.message ? String(e.message) : String(e), true);
+    } catch (logErr) {
+      console.error(`操作ログの記録に失敗しました: ${logErr}`);
+    }
     throw AppError_('UNEXPECTED', buildUserErrorMessage_(actionLabel, 'E999') + detail);
   } finally {
     lock.releaseLock();

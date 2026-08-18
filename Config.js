@@ -18,6 +18,11 @@ const PROP_KEYS = {
   DELIVERY_TEMPLATE_FILE_ID: 'DELIVERY_TEMPLATE_FILE_ID',
   COMPANY_SEAL_IMAGE_URL: 'COMPANY_SEAL_IMAGE_URL', // 承認後に貼り付ける社印画像（Drive直リンク等）
   CHATWORK_API_TOKEN: 'CHATWORK_API_TOKEN',         // Chatwork APIトークン
+  // GASのインストール型トリガー（installTriggers()）を設定している管理用Googleアカウントの
+  // メールアドレス。書類ファイルのオーナーをこのアカウントへ統一することで、シート保護
+  // （protectSheet_）を「オーナー自身が解除できてしまう」抜け道なく実効あるものにする。
+  // 運用者は、実際にトリガーを設定した管理用アカウントのメールアドレスを設定すること。
+  ADMIN_TRIGGER_ACCOUNT_EMAIL: 'ADMIN_TRIGGER_ACCOUNT_EMAIL',
 };
 
 /**
@@ -74,4 +79,9 @@ function getTemplateFileId_(kind) {
     delivery: PROP_KEYS.DELIVERY_TEMPLATE_FILE_ID,
   };
   return getProp_(map[kind]);
+}
+
+/** 管理用アカウント（GASインストール型トリガー設定アカウント）のメールアドレスを取得 */
+function getAdminTriggerAccountEmail_() {
+  return getProp_(PROP_KEYS.ADMIN_TRIGGER_ACCOUNT_EMAIL);
 }

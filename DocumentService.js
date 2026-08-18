@@ -1,15 +1,17 @@
 /**
  * DocumentService.gs
  * 帳票（見積書／請求書／納品書）の実体ファイル操作。
- *  - テンプレートからのコピー生成
- *  - 再作成時の旧版リネーム＋新規コピー（確定仕様7章）
+ *  - テンプレートからのコピー生成（初回作成時のみ）
+ *  - 再作成時は「別ファイル」ではなく、同一ファイル内でシートを複製する（確定仕様F-18・業務フロー⑤-1）
  *  - フォルダ配置（期／未請求案件・請求中案件）
  *  - PDF出力・印刷用URLの取得
  *
  * 命名規則:
  *   案件ごとに専用フォルダ「{案件番号}_{案件名}」を、書類種別のステージフォルダ配下に作る。
- *   その中に、現行版を「{書類種別}_最新」、退避された旧版を
- *   「{書類種別}_v{枝番}_{yyyyMMdd}」という名前で保存する。
+ *   その中に書類ファイルを「{書類種別}_最新」という名前で1つだけ作成し（初回作成時のみ）、
+ *   以降の再作成はこのファイルの中に新しいシートを複製して積み重ねていく。
+ *   ファイル内では、現行版のシートを「{書類種別}_最新」、退避された旧版のシートを
+ *   「{書類種別}_v{枝番}_{yyyyMMdd}」という名前で保持する（旧版シートは protectSheet_ でロック）。
  */
 
 const LATEST_SUFFIX = '_最新';
@@ -26,45 +28,66 @@ function getCaseDocFolder_(docType, caseInfo, stage) {
   return getOrCreateSubfolder_(stageFolder, caseFolderName_(caseInfo));
 }
 
-/** テンプレートをコピーして「{書類種別}_最新」という名前の新規ファイルを作る */
+/**
+ * テンプレートをコピーして「{書類種別}_最新」という名前の新規ファイルを作る（初回作成時のみ）。
+ * 生成直後にファイルオーナーを管理用アカウントへ移譲する（protectSheet_ の実効性を担保するため）。
+ */
 function createLatestDocument_(docType, caseInfo, stage) {
   const folder = getCaseDocFolder_(docType, caseInfo, stage);
   const templateFile = DriveApp.getFileById(docType.getTemplateFileId());
   const newFile = templateFile.makeCopy(`${docType.label}${LATEST_SUFFIX}`, folder);
+
+  const sheet = SpreadsheetApp.openById(newFile.getId()).getSheets()[0];
+  sheet.setName(`${docType.label}${LATEST_SUFFIX}`);
+
+  try {
+    transferFileOwnerToAdminAccount_(newFile);
+  } catch (e) {
+    console.warn(`ファイルオーナーの管理用アカウントへの変更に失敗しました: ${e}`);
+  }
+
   return newFile;
 }
 
 /**
- * 再作成処理: 既存の「{書類種別}_最新」ファイルを枝番付きでリネームして残し、
- * 新しくテンプレートから複製したファイルを改めて「{書類種別}_最新」と命名する。
- * 戻り値は新しい「最新」ファイル。
+ * 再作成処理: ファイルは変えず、ファイル内の現行「最新」シートを複製する。
+ *  1. 現行シートをそのまま複製する（データ転記前の状態のまま）
+ *  2. 複製元（旧版）シートを枝番付きの名前へリネームし、protectSheet_ でロックする
+ *  3. 複製後の新シートを「{書類種別}_最新」として命名・先頭に配置する
+ * データ転記（fillQuoteDocument_ 等）は呼び出し元が、この関数が返すファイルに対して
+ * 改めて getPrimarySheet_ で「最新」シートを解決して行う。
+ *
+ * ファイルオーナーは初回作成時（createLatestDocument_）で既に管理用アカウントへ
+ * 移譲済みのため、再作成時に改めて移譲する必要はない。
  */
-function recreateLatestDocument_(docType, caseInfo, stage) {
-  const folder = getCaseDocFolder_(docType, caseInfo, stage);
-  const latestName = `${docType.label}${LATEST_SUFFIX}`;
-  const existingIt = folder.getFilesByName(latestName);
+function recreateLatestDocument_(docType, caseInfo) {
+  const fileId = extractFileIdFromUrl_(caseInfo[`${docType.key}Link`]);
+  const file = DriveApp.getFileById(fileId);
+  const ss = SpreadsheetApp.openById(fileId);
+  const oldSheet = getPrimarySheet_(file, docType);
 
-  if (existingIt.hasNext()) {
-    const existing = existingIt.next();
-    const nextBranch = countExistingVersions_(folder, docType.label) + 1;
-    const dateStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd');
-    existing.setName(`${docType.label}_v${nextBranch}_${dateStr}`);
+  const newSheet = oldSheet.copyTo(ss);
+
+  const nextBranch = countExistingSheetVersions_(ss, docType.label) + 1;
+  const dateStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd');
+  oldSheet.setName(`${docType.label}_v${nextBranch}_${dateStr}`);
+  try {
+    protectSheet_(oldSheet);
+  } catch (e) {
+    console.warn(`旧シートの保護(protectSheet_)の適用に失敗しました: ${e}`);
   }
 
-  const templateFile = DriveApp.getFileById(docType.getTemplateFileId());
-  return templateFile.makeCopy(latestName, folder);
+  newSheet.setName(`${docType.label}${LATEST_SUFFIX}`);
+  ss.setActiveSheet(newSheet);
+  ss.moveActiveSheet(1);
+
+  return file;
 }
 
-/** フォルダ内の「{label}_v数字_日付」ファイル数をカウントする（次の枝番決定用） */
-function countExistingVersions_(folder, label) {
+/** ファイル内の「{label}_v数字_日付」シート数をカウントする（次の枝番決定用） */
+function countExistingSheetVersions_(ss, label) {
   const prefix = `${label}_v`;
-  const it = folder.getFiles();
-  let count = 0;
-  while (it.hasNext()) {
-    const f = it.next();
-    if (f.getName().indexOf(prefix) === 0) count++;
-  }
-  return count;
+  return ss.getSheets().filter(s => s.getName().indexOf(prefix) === 0).length;
 }
 
 /**
@@ -99,10 +122,11 @@ function moveFileOrFolder_(item, destinationFolder) {
  * PDF書き出し用URLを組み立てる共通ヘルパー。
  * 印刷範囲・改ページ位置（見積書=1〜3ページ、請求書/納品書=1〜2ページ）は
  * 各テンプレート側であらかじめ「ファイル > 印刷設定」で設定しておく前提とし、
- * ここでは対象シート（1枚目, gid）とA4・余白などの共通パラメータのみ指定する。
+ * ここでは対象シート（現行の「最新」シート, gid）とA4・余白などの共通パラメータのみ指定する。
+ * docType を渡さない場合は後方互換として1枚目のシートを対象にする。
  */
-function buildPdfExportUrl_(fileId) {
-  const sheet = SpreadsheetApp.openById(fileId).getSheets()[0];
+function buildPdfExportUrl_(fileId, docType) {
+  const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
   const gid = sheet.getSheetId();
   const params = [
     'format=pdf', `gid=${gid}`, 'size=A4', 'portrait=true', 'fitw=true',
@@ -119,13 +143,13 @@ function buildPdfExportUrl_(fileId) {
  * そのため実装としては「PDFプレビュー（ブラウザ内蔵ビューア）」を新規タブで開き、
  * ビューア右上の印刷アイコンからそのまま印刷できる状態にする。
  */
-function getPrintPreviewUrl_(fileId) {
-  return buildPdfExportUrl_(fileId);
+function getPrintPreviewUrl_(fileId, docType) {
+  return buildPdfExportUrl_(fileId, docType);
 }
 
 /** 指定ファイルをPDFとして書き出し、指定フォルダへ保存する */
-function exportFileToPdf_(fileId, folder, fileName) {
-  const url = buildPdfExportUrl_(fileId);
+function exportFileToPdf_(fileId, folder, fileName, docType) {
+  const url = buildPdfExportUrl_(fileId, docType);
   const token = ScriptApp.getOAuthToken();
   const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
   if (response.getResponseCode() !== 200) {

@@ -40,8 +40,13 @@ const CASE_COLS = {
   DELIVERY_CREATED_AT: 28,
   FINAL_APPROVER: 29,
   FINAL_APPROVED_AT: 30,
+  // 差し戻し日時（差し戻し後は空文字になるまで保持し、再作成ボタンの活性判定に使う内部フラグ）。
+  // 列追加時は「xx期_表示」「xx期_全案件DB」「原本_表示」「原本_全案件DB」各シートの
+  // ヘッダー行(1行目)に、AE列="見積書差し戻し日時"、AF列="請求書差し戻し日時" を運用者が追記すること。
+  QUOTE_REJECTED_AT: 31,
+  INVOICE_REJECTED_AT: 32,
 };
-const CASE_LAST_COL = 30;
+const CASE_LAST_COL = 32;
 const CASE_HEADER_ROW = 1;
 const CASE_DATA_START_ROW = 2;
 
@@ -225,3 +230,9 @@ const SUBFOLDER = {
   UNBILLED: '未請求案件',   // 見積書・請求書の作成〜未請求の間
   BILLING: '請求中案件',    // 請求書承認済み以降（PDF出力・印刷対象）
 };
+
+// ------------------------------------------------------------------
+// 操作ログ（確定仕様5.3節）: 期をまたいで固定の1枚のシートに、
+// 全操作を実行日時・実行者・案件番号・操作種別・結果の形で追記する。
+// ------------------------------------------------------------------
+const OPERATION_LOG_SHEET_NAME = '操作ログ';

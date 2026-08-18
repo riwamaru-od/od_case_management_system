@@ -35,9 +35,12 @@ function sendBillingSummaryReportIfNeeded_() {
   const targets = [firstHalfLabel, secondHalfLabel];
 
   const cases = getCasesByBillingSchedule_(targets);
-  const subject = `【請求予定レポート】${Utilities.formatDate(targetMonthDate, 'Asia/Tokyo', 'yyyy年M月')}分`;
-  const body = buildBillingSummaryBody_(targetMonthDate, cases);
-  notifyAdminDept_(subject, body);
+  const msg = buildBillingSummaryMessage_(targetMonthDate, cases);
+
+  withLock_('請求予定レポート送信', () => {
+    notifyAdminDept_(msg.subject, msg.body, msg.htmlBody);
+    appendOperationLog_('', '請求予定レポート送信', `${cases.length}件`, false);
+  });
 }
 
 /** 全案件DB（当期分）から、指定した請求予定ラベルに合致する案件を抽出する */
@@ -59,14 +62,49 @@ function getCasesByBillingSchedule_(targetLabels) {
     }));
 }
 
-function buildBillingSummaryBody_(targetMonthDate, cases) {
+/** 請求予定レポートの件名・本文（プレーンテキスト／HTML）を組み立てる */
+function buildBillingSummaryMessage_(targetMonthDate, cases) {
   const monthLabel = Utilities.formatDate(targetMonthDate, 'Asia/Tokyo', 'yyyy年M月');
+  const subject = `【請求予定レポート】${monthLabel}分`;
+
   if (cases.length === 0) {
-    return `${monthLabel}分の請求予定案件はありません。`;
+    const body = `${monthLabel}分の請求予定案件はありません。`;
+    const htmlBody = buildEmailHtml_(`${monthLabel}分の請求予定レポート`, [{ label: '対象案件', value: 'ありません' }], null, null);
+    return { subject, body, htmlBody };
   }
+
   const lines = [`${monthLabel}分の請求予定案件一覧（${cases.length}件）`, ''];
   cases.forEach(c => {
     lines.push(`・${c.caseNo}｜${c.clientName}｜${c.caseName}｜請求予定:${c.billingSchedule}｜ステータス:${c.status}｜請求ステータス:${c.billingStatus}`);
   });
-  return lines.join('\n');
+  const body = lines.join('\n');
+
+  const headerCellStyle = 'padding:6px 10px;text-align:left;font-size:11px;color:#666666;border-bottom:2px solid #dddddd;white-space:nowrap;';
+  const cellStyle = 'padding:6px 10px;border-bottom:1px solid #e5e5e5;font-size:12px;color:#222222;';
+  const rowsHtml = cases.map(c => `
+    <tr>
+      <td style="${cellStyle}white-space:nowrap;">${escapeHtmlForMail_(c.caseNo)}</td>
+      <td style="${cellStyle}">${escapeHtmlForMail_(c.clientName)}</td>
+      <td style="${cellStyle}">${escapeHtmlForMail_(c.caseName)}</td>
+      <td style="${cellStyle}white-space:nowrap;">${escapeHtmlForMail_(c.status)}</td>
+      <td style="${cellStyle}white-space:nowrap;">${escapeHtmlForMail_(c.billingStatus)}</td>
+    </tr>`).join('');
+  const htmlBody = `
+  <div style="font-family:'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;max-width:640px;margin:0 auto;padding:24px;background-color:#f7f7f7;">
+    <div style="background-color:#ffffff;border-radius:8px;padding:24px;border:1px solid #e5e5e5;">
+      <h2 style="margin:0 0 16px 0;font-size:16px;color:#222222;">${escapeHtmlForMail_(monthLabel)}分の請求予定案件一覧（${cases.length}件）</h2>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr>
+          <th style="${headerCellStyle}">案件番号</th>
+          <th style="${headerCellStyle}">取引先</th>
+          <th style="${headerCellStyle}">案件名</th>
+          <th style="${headerCellStyle}">ステータス</th>
+          <th style="${headerCellStyle}">請求ステータス</th>
+        </tr>
+        ${rowsHtml}
+      </table>
+      <p style="margin-top:24px;font-size:11px;color:#999999;">本メールは案件管理・見積書自動作成システムより自動送信されています。</p>
+    </div>
+  </div>`;
+  return { subject, body, htmlBody };
 }

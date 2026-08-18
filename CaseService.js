@@ -42,6 +42,8 @@ function handleCaseRowEdit_(sheet, row) {
     sheet.getRange(row, CASE_COLS.BILLING_STATUS).setValue(BILLING_STATUS.NOT_BILLED);
 
     syncCaseToDb_(caseNo);
+
+    appendOperationLog_(caseNo, '案件登録（自動採番）', '', false);
   });
 }
 
@@ -94,6 +96,9 @@ function getCaseInfo_(caseNo) {
     deliveryCreatedAt: get(CASE_COLS.DELIVERY_CREATED_AT),
     finalApprover: get(CASE_COLS.FINAL_APPROVER),
     finalApprovedAt: get(CASE_COLS.FINAL_APPROVED_AT),
+    // 差し戻し済みフラグ（内部用）。空でなければ「差し戻し後、未再作成」の状態を表す。
+    quoteRejectedAt: get(CASE_COLS.QUOTE_REJECTED_AT),
+    invoiceRejectedAt: get(CASE_COLS.INVOICE_REJECTED_AT),
     _row: row,
   };
 }

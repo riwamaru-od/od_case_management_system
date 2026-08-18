@@ -3,12 +3,18 @@
  * 生成した見積書／請求書／納品書ファイルへ、取引先情報・案件情報・本文を書き込む。
  * セル番地は Constants.gs の *_TEMPLATE_CELLS を参照する（変更時はそちらだけ直せばよい）。
  *
- * 前提: 各テンプレートファイルは対象シートが1枚目（getSheets()[0]）にある。
- * 複数シート構成のテンプレートを使う場合はここだけ調整すること。
+ * 前提: 再作成（recreate）のたびに同一ファイル内へシートが複製されていくため、
+ * 「現行の最新版シート」は 1 枚目固定ではなく、シート名（`{書類種別}_最新` = LATEST_SUFFIX）で
+ * 判定する（DocumentService.gs 参照）。docType 未指定時のみ、後方互換として1枚目を返す。
  */
 
-function getPrimarySheet_(file) {
-  return SpreadsheetApp.openById(file.getId()).getSheets()[0];
+function getPrimarySheet_(file, docType) {
+  const ss = SpreadsheetApp.openById(file.getId());
+  if (docType) {
+    const latest = ss.getSheetByName(`${docType.label}${LATEST_SUFFIX}`);
+    if (latest) return latest;
+  }
+  return ss.getSheets()[0];
 }
 
 function setCellValue_(sheet, a1, value) {
@@ -42,7 +48,7 @@ function fillSerialNumber_(sheet, cells, docTypeKey) {
 
 /** 見積書ファイルへヘッダー一式を書き込む */
 function fillQuoteDocument_(file, caseInfo) {
-  const sheet = getPrimarySheet_(file);
+  const sheet = getPrimarySheet_(file, DOC_TYPES.quote);
   const cells = QUOTE_TEMPLATE_CELLS;
   const client = getClientByName_(caseInfo.clientName);
   const staff = findStaffByName_(caseInfo.staffInCharge);
@@ -61,7 +67,7 @@ function fillQuoteDocument_(file, caseInfo) {
 
 /** 請求書ファイルへヘッダー一式を書き込み、見積書から本文範囲を転記する */
 function fillInvoiceDocument_(file, caseInfo, quoteFileId) {
-  const sheet = getPrimarySheet_(file);
+  const sheet = getPrimarySheet_(file, DOC_TYPES.invoice);
   const cells = INVOICE_TEMPLATE_CELLS;
   const client = getClientByName_(caseInfo.clientName);
   const staff = findStaffByName_(caseInfo.staffInCharge);
@@ -70,12 +76,12 @@ function fillInvoiceDocument_(file, caseInfo, quoteFileId) {
   fillStaffCells_(sheet, cells, staff);
   fillSerialNumber_(sheet, cells, 'invoice');
 
-  copyRanges_(quoteFileId, sheet, QUOTE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_INVOICE);
+  copyRanges_(quoteFileId, DOC_TYPES.quote, sheet, QUOTE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_INVOICE);
 }
 
 /** 納品書ファイルへヘッダー一式を書き込み、請求書から本文範囲を転記する */
 function fillDeliveryDocument_(file, caseInfo, invoiceFileId) {
-  const sheet = getPrimarySheet_(file);
+  const sheet = getPrimarySheet_(file, DOC_TYPES.delivery);
   const cells = DELIVERY_TEMPLATE_CELLS;
   const client = getClientByName_(caseInfo.clientName);
   const staff = findStaffByName_(caseInfo.staffInCharge);
@@ -84,16 +90,17 @@ function fillDeliveryDocument_(file, caseInfo, invoiceFileId) {
   fillStaffCells_(sheet, cells, staff);
   fillSerialNumber_(sheet, cells, 'delivery');
 
-  copyRanges_(invoiceFileId, sheet, INVOICE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_DELIVERY);
+  copyRanges_(invoiceFileId, DOC_TYPES.invoice, sheet, INVOICE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_DELIVERY);
 }
 
 /**
  * ソースファイルの指定範囲（複数可）を、書式・値とも含めて対象シートの同一番地へ転記する。
  * （Range.copyTo は別スプレッドシート間で使用できないため、値・書式を個別にコピーする）
- * 例: copyRanges_(quoteFileId, targetSheet, ['B22:E47','E49','F50','F53'])
+ * sourceDocType はソース側で「現行の最新版シート」を特定するために使う（getPrimarySheet_参照）。
+ * 例: copyRanges_(quoteFileId, DOC_TYPES.quote, targetSheet, ['B22:E47','E49','F50','F53'])
  */
-function copyRanges_(sourceFileId, targetSheet, rangeList) {
-  const sourceSheet = SpreadsheetApp.openById(sourceFileId).getSheets()[0];
+function copyRanges_(sourceFileId, sourceDocType, targetSheet, rangeList) {
+  const sourceSheet = getPrimarySheet_(DriveApp.getFileById(sourceFileId), sourceDocType);
   rangeList.forEach(a1 => {
     const sourceRange = sourceSheet.getRange(a1);
     const targetRange = targetSheet.getRange(a1);
@@ -125,28 +132,48 @@ function copyRangeAcrossSpreadsheets_(sourceRange, targetRange) {
 }
 
 /** 承認後、社印画像を指定範囲へ挿入する（G8:G13相当） */
-function insertSealImage_(file, cells) {
+function insertSealImage_(file, cells, docType) {
   const sealUrl = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
   if (!sealUrl) {
     console.warn('COMPANY_SEAL_IMAGE_URL が未設定のため、社印画像の挿入をスキップしました。');
     return;
   }
-  const sheet = getPrimarySheet_(file);
+  const sheet = getPrimarySheet_(file, docType);
   const range = sheet.getRange(cells.SEAL_IMAGE_RANGE);
   sheet.insertImage(sealUrl, range.getColumn(), range.getRow());
 }
 
-/** 承認済みのシートを保護し、直接編集不可にする（シート保護機能） */
+/**
+ * 承認済み・差し戻し済みのシートを保護し、自分を含め誰も編集できない状態にする（シート保護機能）。
+ * 注意: Googleスプレッドシートのシート保護は、原則「ファイルのオーナー」であれば
+ * 保護の設定変更・解除ができてしまう仕様のため、これだけでは実効性が無い。
+ * ファイルオーナー自体を管理用アカウントへ統一する transferFileOwnerToAdminAccount_ と
+ * 組み合わせて初めて「本当に誰も編集できない」状態になる。
+ */
 function protectSheet_(sheet) {
-  const protection = sheet.protect().setDescription('承認済みにつき編集不可');
-  const me = Session.getEffectiveUser();
-  protection.addEditor(me);
+  const protection = sheet.protect().setDescription('承認済み/差し戻しにつき編集不可');
   const editors = protection.getEditors();
-  const editorsToRemove = editors.filter(e => e.getEmail() !== me.getEmail());
-  if (editorsToRemove.length > 0) {
-    protection.removeEditors(editorsToRemove);
-  }
+  editors.forEach(editor => {
+    try {
+      protection.removeEditor(editor);
+    } catch (e) {
+      // オーナー自身は編集者リストから外せない仕様のため失敗しうる（想定内）
+      console.warn(`保護編集者(${editor.getEmail()})の削除に失敗しました: ${e}`);
+    }
+  });
   if (protection.canDomainEdit()) {
     protection.setDomainEdit(false);
   }
+}
+
+/**
+ * 書類ファイルのオーナーを管理用アカウント（PROP_KEYS.ADMIN_TRIGGER_ACCOUNT_EMAIL）へ移譲する。
+ * protectSheet_ の実効性を担保するため、書類ファイル生成時に実行者個人ではなく
+ * 管理用アカウントへオーナーを統一しておく。
+ * 同一 Google Workspace ドメイン内であれば即時反映されるが、個人Gmail等ドメインをまたぐ場合は
+ * 招待制になり、相手側の承諾操作が完了するまで反映されない点に注意。
+ */
+function transferFileOwnerToAdminAccount_(file) {
+  const adminEmail = getAdminTriggerAccountEmail_();
+  file.setOwner(adminEmail);
 }

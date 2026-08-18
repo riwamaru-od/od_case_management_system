@@ -18,7 +18,7 @@ function createDeliveryForCase_(caseNo) {
     const file = createLatestDocument_(docType, caseInfo, 'created');
     fillDeliveryDocument_(file, caseInfo, invoiceFileId);
 
-    const sheet = getPrimarySheet_(file);
+    const sheet = getPrimarySheet_(file, docType);
     const cells = docType.cells();
     setCellValue_(sheet, cells.CREATOR_NAME, staff ? staff.name : email);
     setCellValue_(sheet, cells.CREATED_AT, formatDateTime_(now));
@@ -29,6 +29,8 @@ function createDeliveryForCase_(caseNo) {
       [docType.col.createdAt]: formatDateTime_(now),
     });
 
+    appendOperationLog_(caseNo, '納品書作成', `URL: ${file.getUrl()}`, false);
+
     return { url: file.getUrl() };
-  });
+  }, caseNo);
 }
