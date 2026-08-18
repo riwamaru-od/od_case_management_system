@@ -22,10 +22,14 @@ const PROP_KEYS = {
   // （実行者がそのファイルを閲覧できる権限を持っていればよい）。
   COMPANY_SEAL_IMAGE_URL: 'COMPANY_SEAL_IMAGE_URL',
   CHATWORK_API_TOKEN: 'CHATWORK_API_TOKEN',         // Chatwork APIトークン
-  // GASのインストール型トリガー（installTriggers()）を設定している管理用Googleアカウントの
-  // メールアドレス。書類ファイルのオーナーをこのアカウントへ統一することで、シート保護
-  // （protectSheet_）を「オーナー自身が解除できてしまう」抜け道なく実効あるものにする。
-  // 運用者は、実際にトリガーを設定した管理用アカウントのメールアドレスを設定すること。
+  // 管理用Googleアカウントのメールアドレス。以下2つの役割を持つ。
+  //  (1) GASのインストール型トリガー（installTriggers()）を設定するアカウント
+  //  (2) 書類ファイルを作成するアカウント（＝生成される全書類のオーナー）
+  // Google Workspace を使わない環境では setOwner() によるオーナー移譲が
+  // 招待制となり機能しないため、「書類の作成操作は必ずこのアカウントで行う」ことで
+  // 全書類のオーナーを管理用アカウントに統一する運用とする。
+  // 別のアカウントで書類が作成された場合は、操作ログにエラーとして記録される
+  // （TemplateFillService.gs の verifyAdminAccountExecution_ 参照）。
   ADMIN_TRIGGER_ACCOUNT_EMAIL: 'ADMIN_TRIGGER_ACCOUNT_EMAIL',
 };
 

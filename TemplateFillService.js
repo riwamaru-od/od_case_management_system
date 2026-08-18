@@ -320,11 +320,11 @@ function checkSealImageSetting() {
 }
 
 /**
- * 承認済み・差し戻し済みのシートを保護し、自分を含め誰も編集できない状態にする（シート保護機能）。
- * 注意: Googleスプレッドシートのシート保護は、原則「ファイルのオーナー」であれば
- * 保護の設定変更・解除ができてしまう仕様のため、これだけでは実効性が無い。
- * ファイルオーナー自体を管理用アカウントへ統一する transferFileOwnerToAdminAccount_ と
- * 組み合わせて初めて「本当に誰も編集できない」状態になる。
+ * 承認済み・差し戻し済みのシートを保護し、オーナー以外は誰も編集できない状態にする。
+ * 注意: Googleスプレッドシートのシート保護は、「ファイルのオーナー」であれば
+ * 保護の設定変更・解除ができてしまう仕様（APIでも回避不可）のため、これ単体では
+ * オーナーに対する実効性が無い。書類を必ず管理用アカウントで作成し、その1アカウント
+ * 以外は編集できない状態にすることで担保する（verifyAdminAccountExecution_ 参照）。
  */
 function protectSheet_(sheet) {
   const protection = sheet.protect().setDescription('承認済み/差し戻しにつき編集不可');
@@ -343,15 +343,51 @@ function protectSheet_(sheet) {
 }
 
 /**
- * 書類ファイルのオーナーを管理用アカウント（PROP_KEYS.ADMIN_TRIGGER_ACCOUNT_EMAIL）へ移譲する。
- * protectSheet_ の実効性を担保するため、書類ファイル生成時に実行者個人ではなく
- * 管理用アカウントへオーナーを統一しておく。
- * 同一 Google Workspace ドメイン内であれば即時反映されるが、個人Gmail等ドメインをまたぐ場合は
- * 招待制になり、相手側の承諾操作が完了するまで反映されない点に注意。
+ * 書類ファイルの作成が、管理用アカウントによって実行されているかを検証する。
+ *
+ * Google Workspace を利用していない環境では、DriveApp の setOwner() によるオーナー移譲は
+ * 使えない（ドメインをまたぐ移譲は「招待制」となり、相手が承諾するまで反映されないため、
+ * 移譲したつもりでオーナーが変わっていない、という危険な状態になりうる）。
+ * そこで本システムは「書類を作成する操作は管理用アカウントで行う」という運用を前提とし、
+ * ファイルは最初から管理用アカウントの所有物として作られるようにしている。
+ *
+ * この関数は、その前提が守られているかを実行時に検証する。管理用アカウント以外が
+ * 書類を作成した場合、そのファイルのオーナーは実行者本人になり、承認後も本人であれば
+ * シート保護を解除して編集できてしまうため、操作ログにエラーとして記録して気付けるようにする。
+ * （処理自体は続行する。書類作成そのものを止めてしまうと業務が滞るため）
  */
-function transferFileOwnerToAdminAccount_(file) {
-  const adminEmail = getAdminTriggerAccountEmail_();
-  file.setOwner(adminEmail);
+function verifyAdminAccountExecution_(caseNo, actionLabel) {
+  let adminEmail;
+  try {
+    adminEmail = getAdminTriggerAccountEmail_();
+  } catch (e) {
+    console.warn('ADMIN_TRIGGER_ACCOUNT_EMAIL が未設定のため、実行アカウントの検証をスキップしました。');
+    return true;
+  }
+
+  let executor = '';
+  try {
+    executor = Session.getActiveUser().getEmail() || '';
+  } catch (e) {
+    executor = '';
+  }
+  if (!executor) {
+    console.warn('実行ユーザーのメールアドレスを取得できないため、実行アカウントの検証をスキップしました。');
+    return true;
+  }
+
+  if (executor.trim().toLowerCase() === String(adminEmail).trim().toLowerCase()) return true;
+
+  const message = `管理用アカウント（${adminEmail}）以外（${executor}）が書類を作成したため、`
+    + 'このファイルのオーナーは実行者本人になります。承認後も本人であればシート保護を解除して'
+    + '編集できてしまうため、書類の作成は管理用アカウントで行ってください。';
+  console.warn(message);
+  try {
+    appendOperationLog_(caseNo || '', `${actionLabel}（実行アカウント）`, message, true);
+  } catch (e) {
+    console.error(`実行アカウント警告の記録に失敗しました: ${e}`);
+  }
+  return false;
 }
 
 /**

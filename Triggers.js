@@ -30,6 +30,7 @@ function onOpen() {
     .addItem('サイドバー自動表示を解除する', 'disableSidebarAutoOpen')
     .addSeparator()
     .addItem('社印設定を確認する', 'checkSealImageSetting')
+    .addItem('案件シートの構成を確認・修復する', 'checkAndRepairCaseSheets')
     .addToUi();
   // 単純トリガーの文脈では失敗しうるため、確実な自動オープンは
   // インストール型トリガー（onOpenInstallable）側に任せる。

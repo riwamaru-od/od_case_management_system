@@ -83,6 +83,18 @@ function nextSequence_(key) {
   return next;
 }
 
+/** 1始まりの列番号を列名（1→A, 27→AA）に変換する */
+function columnIndexToLetter_(index) {
+  let letters = '';
+  let n = index;
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    letters = String.fromCharCode(65 + remainder) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
 /** シート上で指定した「案件番号」の行番号を探す。見つからなければ null。 */
 function findRowByCaseNo_(sheet, caseNo) {
   const lastRow = sheet.getLastRow();

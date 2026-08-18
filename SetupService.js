@@ -1,0 +1,86 @@
+/**
+ * SetupService.gs
+ * 案件シート（メイン画面UI・全案件DB・それぞれの原本）の構成を検証し、
+ * 不足している列・未設定のヘッダーを補う保守用の処理。
+ *
+ * 主な用途は、列を追加する仕様変更（例: v2.0 で AE列「見積書差し戻し日時」、
+ * AF列「請求書差し戻し日時」を追加）を、既存のスプレッドシートへ反映すること。
+ * スクリプト側は CASE_LAST_COL 列ぶんの読み書きを行うため、シートの列数が
+ * 足りないと範囲外エラーになる。この処理で事前に揃えておく。
+ */
+
+/** 構成を確認・修復する対象シート名の一覧（当期分 + 原本） */
+function getCaseSheetNamesForSetup_() {
+  const names = getPeriodSheetNames_(getCurrentPeriodNumber_());
+  return [names.ui, names.db, MASTER_UI_SHEET_NAME, MASTER_DB_SHEET_NAME];
+}
+
+/**
+ * 1枚の案件シートについて、列数とヘッダーを揃える。
+ * 既に入力されているヘッダーは尊重し、空欄の見出しのみを補う
+ * （利用者が独自の表記に変更している場合を上書きしないため）。
+ * @return {string[]} 実施した変更の説明（変更が無ければ空配列）
+ */
+function ensureCaseSheetStructure_(sheet) {
+  const changes = [];
+
+  const maxColumns = sheet.getMaxColumns();
+  if (maxColumns < CASE_LAST_COL) {
+    sheet.insertColumnsAfter(maxColumns, CASE_LAST_COL - maxColumns);
+    changes.push(`列数を ${maxColumns} → ${CASE_LAST_COL} へ拡張`);
+  }
+
+  const headerRange = sheet.getRange(CASE_HEADER_ROW, 1, 1, CASE_LAST_COL);
+  const headers = headerRange.getValues()[0];
+  const filled = [];
+  for (let i = 0; i < CASE_LAST_COL; i++) {
+    if (String(headers[i] == null ? '' : headers[i]).trim() === '') {
+      headers[i] = CASE_HEADERS[i];
+      filled.push(`${columnIndexToLetter_(i + 1)}列「${CASE_HEADERS[i]}」`);
+    }
+  }
+  if (filled.length > 0) {
+    headerRange.setValues([headers]);
+    changes.push(`未設定のヘッダーを追加: ${filled.join('、')}`);
+  }
+
+  return changes;
+}
+
+/**
+ * メニュー「案件シートの構成を確認・修復する」から呼ばれる。
+ * 当期のUI/DBシートと原本シートについて、列数とヘッダーを揃えて結果を表示する。
+ */
+function checkAndRepairCaseSheets() {
+  const ui = SpreadsheetApp.getUi();
+  const lines = [];
+
+  try {
+    withLock_('案件シート構成の確認・修復', () => {
+      const ss = getMainSpreadsheet_();
+      getCaseSheetNamesForSetup_().forEach(name => {
+        const sheet = ss.getSheetByName(name);
+        if (!sheet) {
+          lines.push(`× ${name}: シートが見つかりません`);
+          return;
+        }
+        const changes = ensureCaseSheetStructure_(sheet);
+        lines.push(changes.length > 0
+          ? `● ${name}: ${changes.join(' / ')}`
+          : `○ ${name}: 変更なし（正常）`);
+      });
+      appendOperationLog_('', '案件シート構成の確認・修復', lines.join(' | '), false);
+    });
+  } catch (e) {
+    ui.alert(`案件シート構成の確認・修復に失敗しました。\n\n${e && e.message ? e.message : e}`);
+    return;
+  }
+
+  ui.alert([
+    '案件シート構成の確認・修復',
+    '',
+    ...lines,
+    '',
+    `必要な列数: ${CASE_LAST_COL}列（A〜${columnIndexToLetter_(CASE_LAST_COL)}）`,
+  ].join('\n'));
+}

@@ -32,21 +32,20 @@ function getCaseDocFolder_(docType, caseInfo, stage) {
  * テンプレートをコピーして「{案件番号}_{書類種別}」という名前の新規ファイルを作る（初回作成時のみ）。
  * このファイル名（スプレッドシートのタイトル）はファイル自体が存続する限り変わらない
  * （再作成してもファイルは同一のまま、中のシートだけが積み重なっていくため）。
- * 生成直後にファイルオーナーを管理用アカウントへ移譲する（protectSheet_ の実効性を担保するため）。
+ *
+ * ファイルのオーナーは「この処理を実行したアカウント」になる。書類保護を実効あるものに
+ * するには管理用アカウントがオーナーである必要があるため、実行アカウントが管理用アカウントで
+ * あることを検証する（verifyAdminAccountExecution_ 参照）。
  */
 function createLatestDocument_(docType, caseInfo, stage) {
+  verifyAdminAccountExecution_(caseInfo.caseNo, `${docType.label}作成`);
+
   const folder = getCaseDocFolder_(docType, caseInfo, stage);
   const templateFile = DriveApp.getFileById(docType.getTemplateFileId());
   const newFile = templateFile.makeCopy(`${caseInfo.caseNo}_${docType.label}`, folder);
 
   const sheet = SpreadsheetApp.openById(newFile.getId()).getSheets()[0];
   sheet.setName(`${docType.label}${LATEST_SUFFIX}`);
-
-  try {
-    transferFileOwnerToAdminAccount_(newFile);
-  } catch (e) {
-    console.warn(`ファイルオーナーの管理用アカウントへの変更に失敗しました: ${e}`);
-  }
 
   return newFile;
 }
