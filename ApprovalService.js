@@ -20,13 +20,17 @@ function createDocumentForCase_(docTypeKey, caseNo) {
       fillInvoiceDocument_(file, caseInfo, quoteFileId);
     }
 
-    setCaseFields_(caseNo, {
+    const fieldUpdates = {
       [docType.col.link]: file.getUrl(),
       [CASE_COLS.STATUS]: docType.status.inProgress,
-    });
+    };
+    if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = '';
+    setCaseFields_(caseNo, fieldUpdates);
+
+    appendOperationLog_(caseNo, `${docType.label}作成`, `URL: ${file.getUrl()}`, false);
 
     return { url: file.getUrl() };
-  });
+  }, caseNo);
 }
 
 /**
@@ -44,26 +48,30 @@ function completeDocumentForCase_(docTypeKey, caseNo, comment) {
 
     const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
     const file = DriveApp.getFileById(fileId);
-    const sheet = getPrimarySheet_(file);
+    const sheet = getPrimarySheet_(file, docType);
     const cells = docType.cells();
     setCellValue_(sheet, cells.CREATOR_NAME, staff ? staff.name : email);
     setCellValue_(sheet, cells.CREATED_AT, formatDateTime_(now));
     if (comment) setCellValue_(sheet, cells.REQUEST_COMMENT, comment);
 
-    setCaseFields_(caseNo, {
+    const fieldUpdates = {
       [docType.col.creator]: staff ? staff.name : email,
       [docType.col.createdAt]: formatDateTime_(now),
       [CASE_COLS.STATUS]: docType.status.drafted,
-    });
+    };
+    if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = '';
+    setCaseFields_(caseNo, fieldUpdates);
 
     const msg = buildApprovalRequestMessage_(docType.label, {
       caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, clientName: caseInfo.clientName,
       requesterName: staff ? staff.name : email, docUrl: file.getUrl(),
     }, comment);
-    notifyAdminDept_(msg.subject, msg.body);
+    notifyAdminDept_(msg.subject, msg.body, msg.htmlBody);
+
+    appendOperationLog_(caseNo, `${docType.label}完成（承認依頼）`, comment || '', false);
 
     return { status: docType.status.drafted };
-  });
+  }, caseNo);
 }
 
 /** 承認: 総務担当（該当ロール保持者）のみ実行可能 */
@@ -79,7 +87,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
 
     const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
     const file = DriveApp.getFileById(fileId);
-    const sheet = getPrimarySheet_(file);
+    const sheet = getPrimarySheet_(file, docType);
     const cells = docType.cells();
     setCellValue_(sheet, cells.APPROVER_NAME, staff ? staff.name : email);
     setCellValue_(sheet, cells.APPROVED_AT, formatDateTime_(now));
@@ -92,7 +100,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     console.warn(`シート保護(protectSheet_)の適用に失敗しました: ${e}`);
     }
     try {
-    insertSealImage_(file, cells);
+    insertSealImage_(file, cells, docType);
     } catch (e) {
     console.warn(`社印画像の挿入に失敗しました: ${e}`);
     }
@@ -114,10 +122,12 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     const notifyMsg = buildApprovedMessage_(docType.label, {
       caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, docUrl: file.getUrl(),
     }, comment);
-    if (creatorStaff) notifyStaff_(creatorStaff.email, notifyMsg.subject, notifyMsg.body);
+    if (creatorStaff) notifyStaff_(creatorStaff.email, notifyMsg.subject, notifyMsg.body, notifyMsg.htmlBody);
+
+    appendOperationLog_(caseNo, `${docType.label}承認`, comment || '', false);
 
     return { status: docType.status.approved };
-  });
+  }, caseNo);
 }
 
 /** 差し戻し: 総務担当が承認せず、作成中に戻す */
@@ -128,19 +138,32 @@ function rejectDocumentForCase_(docTypeKey, caseNo, comment) {
     assertRole_(email, docType.approverRoles, `${docType.label}承認`);
 
     const caseInfo = getCaseInfo_(caseNo);
+    const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
+    const file = DriveApp.getFileById(fileId);
+    const sheet = getPrimarySheet_(file, docType);
     if (comment) {
-      const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
-      const file = DriveApp.getFileById(fileId);
-      const sheet = getPrimarySheet_(file);
       setCellValue_(sheet, docType.cells().APPROVE_COMMENT, `[差し戻し] ${comment}`);
     }
 
-    setCaseFields_(caseNo, { [CASE_COLS.STATUS]: docType.status.inProgress });
+    // 差し戻された書類のシートを保護（編集不可にする）。承認時と同様、
+    // 処理全体を失敗させないよう警告ログに留める。
+    try {
+      protectSheet_(sheet);
+    } catch (e) {
+      console.warn(`シート保護(protectSheet_)の適用に失敗しました: ${e}`);
+    }
+
+    const fieldUpdates = { [CASE_COLS.STATUS]: docType.status.inProgress };
+    if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = formatDateTime_(new Date());
+    setCaseFields_(caseNo, fieldUpdates);
+
+    appendOperationLog_(caseNo, `${docType.label}差し戻し`, comment || '', false);
+
     return { status: docType.status.inProgress };
-  });
+  }, caseNo);
 }
 
-/** 再作成: 旧版をリネームして残し、新しいテンプレートコピーを「_最新」として作り直す */
+/** 再作成: 同一ファイル内で旧版シートをロック・退避し、新シートを「最新」として作り直す */
 function recreateDocumentForCase_(docTypeKey, caseNo) {
   return withLock_(`${DOC_TYPES[docTypeKey].label}の再作成`, () => {
     const docType = DOC_TYPES[docTypeKey];
@@ -148,22 +171,26 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
     assertRole_(email, docType.approverRoles, `${docType.label}承認`);
 
     const caseInfo = getCaseInfo_(caseNo);
-    const newFile = recreateLatestDocument_(docType, caseInfo, 'created');
+    const file = recreateLatestDocument_(docType, caseInfo);
 
     if (docTypeKey === 'quote') {
-      fillQuoteDocument_(newFile, caseInfo);
+      fillQuoteDocument_(file, caseInfo);
     } else if (docTypeKey === 'invoice') {
       const quoteFileId = extractFileIdFromUrl_(caseInfo.quoteLink);
-      fillInvoiceDocument_(newFile, caseInfo, quoteFileId);
+      fillInvoiceDocument_(file, caseInfo, quoteFileId);
     }
 
-    setCaseFields_(caseNo, {
-      [docType.col.link]: newFile.getUrl(),
+    const fieldUpdates = {
+      [docType.col.link]: file.getUrl(),
       [CASE_COLS.STATUS]: docType.status.inProgress,
-    });
+    };
+    if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = '';
+    setCaseFields_(caseNo, fieldUpdates);
 
-    return { url: newFile.getUrl(), status: docType.status.inProgress };
-  });
+    appendOperationLog_(caseNo, `${docType.label}再作成`, `URL: ${file.getUrl()}`, false);
+
+    return { url: file.getUrl(), status: docType.status.inProgress };
+  }, caseNo);
 }
 
 /** 印刷（PDFプレビューを新規タブで開く用のURLを返す。印刷者/印刷日時をテンプレートへ記録） */
@@ -177,7 +204,7 @@ function printDocumentForCase_(docTypeKey, caseNo) {
 
     const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
     const file = DriveApp.getFileById(fileId);
-    const sheet = getPrimarySheet_(file);
+    const sheet = getPrimarySheet_(file, docType);
     const cells = docType.cells();
     setCellValue_(sheet, cells.PRINTED_BY, staff ? staff.name : email);
     setCellValue_(sheet, cells.PRINTED_AT, formatDateTime_(now));
@@ -193,8 +220,10 @@ function printDocumentForCase_(docTypeKey, caseNo) {
       markBillingCompletedIfApplicable_(caseNo);
     }
 
-    return { printUrl: getPrintPreviewUrl_(fileId) };
-  });
+    appendOperationLog_(caseNo, `${docType.label}印刷`, '', false);
+
+    return { printUrl: getPrintPreviewUrl_(fileId, docType) };
+  }, caseNo);
 }
 
 /** PDF出力: PDFを保存フォルダへ書き出し、リンクをシートへ記録する */
@@ -208,12 +237,12 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
 
     const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
     const file = DriveApp.getFileById(fileId);
-    const sheet = getPrimarySheet_(file);
+    const sheet = getPrimarySheet_(file, docType);
     const cells = docType.cells();
 
     const stage = docTypeKey === 'invoice' ? 'billed' : 'created';
     const folder = getCaseDocFolder_(docType, caseInfo, stage);
-    const pdfFile = exportFileToPdf_(fileId, folder, `${docType.label}_${caseInfo.caseNo}`);
+    const pdfFile = exportFileToPdf_(fileId, folder, `${docType.label}_${caseInfo.caseNo}`, docType);
 
     setCellValue_(sheet, cells.PDF_OUTPUT_BY, staff ? staff.name : email);
     setCellValue_(sheet, cells.PDF_OUTPUT_AT, formatDateTime_(now));
@@ -229,8 +258,10 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
       markBillingCompletedIfApplicable_(caseNo);
     }
 
+    appendOperationLog_(caseNo, `${docType.label}PDF出力`, `URL: ${pdfFile.getUrl()}`, false);
+
     return { pdfUrl: pdfFile.getUrl() };
-  });
+  }, caseNo);
 }
 
 /**

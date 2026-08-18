@@ -47,6 +47,8 @@ function finalApproveForCase_(caseNo, comment) {
     // 全案件DBへ反映済みの状態で、メイン画面UIから当該行を削除する
     removeCaseFromUiAfterFinalApproval_(caseNo);
 
+    appendOperationLog_(caseNo, '最終承認', comment || '', false);
+
     return { status: STATUS.FINAL_APPROVED };
-  });
+  }, caseNo);
 }

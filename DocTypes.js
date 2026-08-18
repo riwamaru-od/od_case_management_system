@@ -20,6 +20,7 @@ const DOC_TYPES = {
       approvedAt: CASE_COLS.QUOTE_APPROVED_AT,
       outputBy: CASE_COLS.QUOTE_OUTPUT_BY,
       outputAt: CASE_COLS.QUOTE_OUTPUT_AT,
+      rejectedAt: CASE_COLS.QUOTE_REJECTED_AT,
     },
     status: {
       inProgress: STATUS.QUOTE_IN_PROGRESS,
@@ -47,6 +48,7 @@ const DOC_TYPES = {
       approvedAt: CASE_COLS.INVOICE_APPROVED_AT,
       outputBy: CASE_COLS.INVOICE_OUTPUT_BY,
       outputAt: CASE_COLS.INVOICE_OUTPUT_AT,
+      rejectedAt: CASE_COLS.INVOICE_REJECTED_AT,
     },
     status: {
       inProgress: STATUS.INVOICE_IN_PROGRESS,
