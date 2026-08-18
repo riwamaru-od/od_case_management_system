@@ -31,6 +31,9 @@ function onOpen() {
     .addSeparator()
     .addItem('社印設定を確認する', 'checkSealImageSetting')
     .addItem('案件シートの構成を確認・修復する', 'checkAndRepairCaseSheets')
+    .addSeparator()
+    .addItem('今すぐバックアップを作成する', 'createDatabaseBackupManually')
+    .addItem('過去期のデータをアーカイブする', 'archiveOldPeriodSheetsManually')
     .addToUi();
   // 単純トリガーの文脈では失敗しうるため、確実な自動オープンは
   // インストール型トリガー（onOpenInstallable）側に任せる。
@@ -90,10 +93,29 @@ function onEditInstallable(e) {
   }
 }
 
-/** 時間主導型トリガーから毎日呼ばれる想定のエントリーポイント */
+/**
+ * 時間主導型トリガーから毎日呼ばれる想定のエントリーポイント。
+ * 1つの処理が失敗しても後続が止まらないよう、それぞれ個別に例外を捕捉する。
+ */
 function dailyScheduledTasks() {
-  ensureNextPeriodResourcesIfNeeded();
-  sendBillingSummaryReportIfNeeded_();
+  runDailyTask_('翌期リソースの準備', ensureNextPeriodResourcesIfNeeded);
+  runDailyTask_('過去期データのアーカイブ', archiveOldPeriodSheetsIfNeeded_);
+  runDailyTask_('データベースのバックアップ', backupDatabasesIfNeeded_);
+  runDailyTask_('請求予定レポートの送信', sendBillingSummaryReportIfNeeded_);
+}
+
+/** 日次処理の1項目を実行する。失敗しても後続の処理は続行し、操作ログへ記録する。 */
+function runDailyTask_(label, fn) {
+  try {
+    fn();
+  } catch (e) {
+    console.error(`[日次処理] ${label} に失敗しました: ${e && e.stack ? e.stack : e}`);
+    try {
+      appendOperationLog_('', `日次処理: ${label}`, e && e.message ? String(e.message) : String(e), true);
+    } catch (logError) {
+      console.error(`操作ログの記録にも失敗しました: ${logError}`);
+    }
+  }
 }
 
 /**

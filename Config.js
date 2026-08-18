@@ -13,6 +13,12 @@ const PROP_KEYS = {
   FOLDER_ID_QUOTE_ROOT: 'FOLDER_ID_QUOTE_ROOT',     // 見積書ルートフォルダID
   FOLDER_ID_INVOICE_ROOT: 'FOLDER_ID_INVOICE_ROOT', // 請求書ルートフォルダID
   FOLDER_ID_DELIVERY_ROOT: 'FOLDER_ID_DELIVERY_ROOT', // 納品書ルートフォルダID
+  // 過去期のアーカイブファイル（{n}期_案件データ）の保存先フォルダID。
+  // メインスプレッドシートが肥大化しないよう、期が切り替わったら前期の
+  // 表示シート・全案件DBシートをこのフォルダ内の別ファイルへ退避する。
+  FOLDER_ID_ARCHIVE_ROOT: 'FOLDER_ID_ARCHIVE_ROOT',
+  // 全案件DB・取引先DBの定期バックアップの保存先フォルダID。
+  FOLDER_ID_BACKUP_ROOT: 'FOLDER_ID_BACKUP_ROOT',
   QUOTE_TEMPLATE_FILE_ID: 'QUOTE_TEMPLATE_FILE_ID', // 見積書テンプレート（スプレッドシート）
   INVOICE_TEMPLATE_FILE_ID: 'INVOICE_TEMPLATE_FILE_ID',
   DELIVERY_TEMPLATE_FILE_ID: 'DELIVERY_TEMPLATE_FILE_ID',
@@ -92,4 +98,14 @@ function getTemplateFileId_(kind) {
 /** 管理用アカウント（GASインストール型トリガー設定アカウント）のメールアドレスを取得 */
 function getAdminTriggerAccountEmail_() {
   return getProp_(PROP_KEYS.ADMIN_TRIGGER_ACCOUNT_EMAIL);
+}
+
+/** 過去期アーカイブの保存先フォルダを取得 */
+function getArchiveFolder_() {
+  return DriveApp.getFolderById(getProp_(PROP_KEYS.FOLDER_ID_ARCHIVE_ROOT));
+}
+
+/** バックアップの保存先フォルダを取得 */
+function getBackupFolder_() {
+  return DriveApp.getFolderById(getProp_(PROP_KEYS.FOLDER_ID_BACKUP_ROOT));
 }
