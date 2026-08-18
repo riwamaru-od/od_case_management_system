@@ -164,76 +164,74 @@ function parseA1Range_(a1) {
 }
 
 /**
- * 指定したA1形式のセル範囲1つを、1ページ（A4）に収まるPNG画像として書き出す。
- * fitw/fith を両方trueにすることで、この範囲単体が確実に1ページへ収まるようにする。
+ * 一時スプレッドシート内に「1ページ分の印刷用シート」を1枚作る。
+ * 元シートをまるごと複製したうえで、対象範囲の外側にある行・列を「非表示」にする。
+ * （行・列の削除ではなく非表示にするのは、削除すると数式の参照が壊れて #REF! に
+ *  なってしまうため。非表示の行・列はPDF出力の対象外になる仕様を利用している。
+ *  シートごと複製するため、列幅・行高・結合セル・書式・社印画像もそのまま維持される）
  */
-function exportRangeAsPngBlob_(fileId, docType, a1Range) {
-  const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
-  const gid = sheet.getSheetId();
+function buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, sheetName) {
+  const copied = sourceSheet.copyTo(tempSs).setName(sheetName);
   const box = parseA1Range_(a1Range);
-  const params = [
-    'format=png', `gid=${gid}`,
-    `r1=${box.r1}`, `r2=${box.r2}`, `c1=${box.c1}`, `c2=${box.c2}`,
-    'size=A4', 'portrait=true', 'fitw=true', 'fith=true',
-    'gridlines=false', 'printtitle=false', 'sheetnames=false',
-    'top_margin=0.3', 'bottom_margin=0.3', 'left_margin=0.3', 'right_margin=0.3',
-  ].join('&');
-  const url = `https://docs.google.com/spreadsheets/d/${fileId}/export?${params}`;
-  const token = ScriptApp.getOAuthToken();
-  const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
-  if (response.getResponseCode() !== 200) {
-    throw AppError_('PDF_EXPORT_FAILED', buildUserErrorMessage_('PDF出力', 'E102'));
-  }
-  return response.getBlob();
+  const maxRows = copied.getMaxRows();
+  const maxCols = copied.getMaxColumns();
+
+  // 範囲より後ろ → 前 の順に非表示にする（hideRows/hideColumns は1始まりの絶対位置指定）
+  if (maxRows > box.r2) copied.hideRows(box.r2 + 1, maxRows - box.r2);
+  if (box.r1 > 0) copied.hideRows(1, box.r1);
+  if (maxCols > box.c2) copied.hideColumns(box.c2 + 1, maxCols - box.c2);
+  if (box.c1 > 0) copied.hideColumns(1, box.c1);
+  return copied;
 }
 
-const PDF_PAGE_WIDTH_PT = 595;  // A4 幅（ポイント）
-const PDF_PAGE_HEIGHT_PT = 842; // A4 高さ（ポイント）
-
 /**
- * 複数の画像を、Googleスライドを介して1枚ずつのページとして結合し、PDFのBlobとして返す。
- * Apps ScriptにはネイティブなPDF結合機能が無いため、一時的なスライドを作成して
- * 各画像をA4サイズのスライド1枚ずつに敷き詰め、プレゼンテーション全体をPDF書き出し
- * することで実現している（結果、PDF内の文字は画像化され検索・コピー不可になる点に注意）。
- * 一時スライドは書き出し後にゴミ箱へ移動する。
+ * PDF_PAGE_RANGES に定義された各ページ範囲を、それぞれ1ページに収めたPDFとして書き出す。
+ *
+ * 実現方法: Googleスプレッドシートには手動でページ区切りを挿入する機能が無く、
+ * PDFエクスポートAPIも1回のリクエストで飛び地の複数範囲を別々のページへ分割できない。
+ * 一方で「スプレッドシート全体（gid指定なし）をPDF出力すると、各シートが必ず
+ * 新しいページから始まる」という仕様がある。そこで一時スプレッドシートを作り、
+ * ページ範囲1つにつき1枚のシートを用意（範囲外は非表示）したうえで、そのファイル
+ * 全体をPDF化することで「指定範囲＝1ページ」を実現している。
+ * fitw/fith を両方trueにすることで、各シートが1ページに収まるよう自動縮小される。
+ * 一時ファイルは書き出し後にゴミ箱へ移動する。
  */
-function mergeImagesIntoPdfBlob_(imageBlobs, fileName) {
-  const presentation = SlidesApp.create(`_tmp_pdf_merge_${Utilities.getUuid()}`);
+function exportRangesAsPagedPdfBlob_(fileId, docType, fileName) {
+  const pageRanges = PDF_PAGE_RANGES[docType.key];
+  const sourceSheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
+  const tempSs = SpreadsheetApp.create(`_tmp_pdf_${Utilities.getUuid()}`);
+
   try {
-    presentation.setPageSize(PDF_PAGE_WIDTH_PT, PDF_PAGE_HEIGHT_PT);
-    const originalFirstSlide = presentation.getSlides()[0];
-
-    imageBlobs.forEach(blob => {
-      const slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
-      slide.insertImage(blob, 0, 0, PDF_PAGE_WIDTH_PT, PDF_PAGE_HEIGHT_PT);
+    const defaultSheet = tempSs.getSheets()[0];
+    pageRanges.forEach((a1Range, i) => {
+      buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, `page${i + 1}`);
     });
-    originalFirstSlide.remove();
-    presentation.saveAndClose();
+    tempSs.deleteSheet(defaultSheet); // 複製したシートだけを残す
+    SpreadsheetApp.flush();
 
-    const url = `https://docs.google.com/presentation/d/${presentation.getId()}/export/pdf`;
+    // gid を指定しない = ファイル全体（=全シート）を対象に出力する
+    const params = [
+      'format=pdf', 'size=A4', 'portrait=true', 'fitw=true', 'fith=true',
+      'gridlines=false', 'printtitle=false', 'sheetnames=false',
+      'top_margin=0.3', 'bottom_margin=0.3', 'left_margin=0.3', 'right_margin=0.3',
+    ].join('&');
+    const url = `https://docs.google.com/spreadsheets/d/${tempSs.getId()}/export?${params}`;
     const token = ScriptApp.getOAuthToken();
     const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
     if (response.getResponseCode() !== 200) {
-      throw AppError_('PDF_EXPORT_FAILED', buildUserErrorMessage_('PDF出力', 'E104'));
+      throw AppError_('PDF_EXPORT_FAILED', buildUserErrorMessage_('PDF出力', 'E102'));
     }
     return response.getBlob().setName(`${fileName}.pdf`);
   } finally {
-    DriveApp.getFileById(presentation.getId()).setTrashed(true);
+    DriveApp.getFileById(tempSs.getId()).setTrashed(true);
   }
-}
-
-/** PDF_PAGE_RANGES に定義された各ページ範囲を1ページずつ書き出し、1つのPDFへ合成する */
-function exportRangesAsMergedPdf_(fileId, docType, fileName) {
-  const pageRanges = PDF_PAGE_RANGES[docType.key];
-  const imageBlobs = pageRanges.map(a1Range => exportRangeAsPngBlob_(fileId, docType, a1Range));
-  return mergeImagesIntoPdfBlob_(imageBlobs, fileName);
 }
 
 /** 指定ファイルをPDFとして書き出し、指定フォルダへ保存する */
 function exportFileToPdf_(fileId, folder, fileName, docType) {
   const pageRanges = docType && PDF_PAGE_RANGES[docType.key];
   const blob = (pageRanges && pageRanges.length)
-    ? exportRangesAsMergedPdf_(fileId, docType, fileName)
+    ? exportRangesAsPagedPdfBlob_(fileId, docType, fileName)
     : exportWholeSheetAsPdfBlob_(fileId, docType, fileName);
   return folder.createFile(blob);
 }

@@ -8,14 +8,15 @@
  *   2) 単純トリガー onEdit(e) は権限の都合上フル機能を実行できないため、
  *      本プロジェクトでは自動採番などの副作用を伴う処理は全てインストール型トリガー
  *      （onEditInstallable）側で行う。単純トリガーの onEdit(e) は何もしない。
- *   3) onOpen() はスプレッドシートを開くたびに自動実行される単純トリガー。
- *      メニュー追加に加えて showSidebar() を呼び、サイドバーを自動的に開く。
- *      サイドバー表示はUI操作でありAppsScriptの追加認可を必要としないため、
- *      単純トリガーのままで動作する（インストール型トリガーへの変更は不要）。
- *      注意: プロジェクトが未認可（スコープ追加後の再認可が済んでいない等）の場合、
- *      単純トリガーはエラーも出さず実行自体がスキップされる仕様のため、
- *      自動オープンが効かない場合はエディタから任意の関数（installTriggers() 等）を
- *      一度手動実行し、認可ダイアログを完了させること。
+ *   3) サイドバーの自動オープンは、インストール型の onOpen トリガー
+ *      （onOpenInstallable）が担当する。単純トリガーの onOpen() からも
+ *      念のため試みるが、単純トリガーは認可を必要とする処理を含むと実行自体が
+ *      スキップされるため、確実に開かせるにはインストール型トリガーが必要。
+ *      重要: インストール型トリガーは「登録したユーザー個人」に紐づくため、
+ *      自動オープンを使いたい利用者はそれぞれ自分のアカウントで一度
+ *      installTriggers() を実行する必要がある（実行時に認可ダイアログが出る）。
+ *      未登録の利用者も、メニュー「案件管理システム > サイドバーを開く」から
+ *      いつでも手動で開ける。
  */
 
 function onOpen() {
@@ -23,10 +24,24 @@ function onOpen() {
     .createMenu('案件管理システム')
     .addItem('サイドバーを開く', 'showSidebar')
     .addToUi();
+  // 単純トリガーの文脈では失敗しうるため、確実な自動オープンは
+  // インストール型トリガー（onOpenInstallable）側に任せる。
   try {
     showSidebar();
   } catch (e) {
     console.warn(`サイドバーの自動オープンに失敗しました: ${e}`);
+  }
+}
+
+/**
+ * インストール型 onOpen トリガー本体。スプレッドシートを開いた際にサイドバーを開く。
+ * 単純トリガーと違い認可済みの権限で実行されるため、確実にサイドバーを表示できる。
+ */
+function onOpenInstallable(e) {
+  try {
+    showSidebar();
+  } catch (err) {
+    console.error(`onOpenInstallable error: ${err && err.stack ? err.stack : err}`);
   }
 }
 
@@ -73,9 +88,18 @@ function dailyScheduledTasks() {
   sendBillingSummaryReportIfNeeded_();
 }
 
-/** 初回セットアップ用。既存トリガーを削除してから登録し直す（重複登録防止）。 */
+/**
+ * 初回セットアップ用。既存トリガーを削除してから登録し直す（重複登録防止）。
+ * インストール型トリガーは実行したユーザー個人に紐づくため、サイドバーの自動
+ * オープンを利用したい担当者は、それぞれ自分のアカウントでこの関数を1度実行すること。
+ */
 function installTriggers() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+
+  ScriptApp.newTrigger('onOpenInstallable')
+    .forSpreadsheet(getMainSpreadsheet_())
+    .onOpen()
+    .create();
 
   ScriptApp.newTrigger('onEditInstallable')
     .forSpreadsheet(getMainSpreadsheet_())
