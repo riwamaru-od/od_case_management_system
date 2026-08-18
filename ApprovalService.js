@@ -108,9 +108,11 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     console.warn(`シート保護(protectSheet_)の適用に失敗しました: ${e}`);
     }
     try {
-    insertSealImage_(file, cells, docType);
+      insertSealImage_(file, cells, docType);
     } catch (e) {
-    console.warn(`社印画像の挿入に失敗しました: ${e}`);
+      // 承認処理自体は成立させるが、押印漏れに気付けるよう操作ログにエラーとして残す
+      console.warn(`社印画像の挿入に失敗しました: ${e}`);
+      appendOperationLog_(caseNo, `${docType.label}承認（社印）`, `社印画像の挿入に失敗: ${e && e.message ? e.message : e}`, true);
     }
 
 
@@ -218,6 +220,9 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
  * PDF出力: PDFを保存フォルダへ書き出し、リンクをシートへ記録する。
  * 出力操作はこの「PDF出力」に統一されている（旧「印刷」機能は廃止）。
  * 挙動: ドライブへPDFを保存 → 呼び出し元（クライアント側）が返却されたURLを新規タブで開く。
+ *
+ * 順序に注意: 出力者・出力日時をシートへ書き込んでから（flushで確定させてから）
+ * PDFを書き出す。逆順にすると、出力したPDFの操作履歴欄が空のままになってしまう。
  */
 function exportDocumentPdfForCase_(docTypeKey, caseNo) {
   return withLock_(`${DOC_TYPES[docTypeKey].label}のPDF出力`, () => {
@@ -232,12 +237,14 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
     const sheet = getPrimarySheet_(file, docType);
     const cells = docType.cells();
 
+    // 先に出力ログをシートへ書き込み、確定させてからPDF化する
+    setCellValue_(sheet, cells.PDF_OUTPUT_BY, staff ? staff.name : email);
+    setCellValue_(sheet, cells.PDF_OUTPUT_AT, formatDateTime_(now));
+    SpreadsheetApp.flush();
+
     const stage = docTypeKey === 'invoice' ? 'billed' : 'created';
     const folder = getCaseDocFolder_(docType, caseInfo, stage);
     const pdfFile = exportFileToPdf_(fileId, folder, `${docType.label}_${caseInfo.caseNo}`, docType);
-
-    setCellValue_(sheet, cells.PDF_OUTPUT_BY, staff ? staff.name : email);
-    setCellValue_(sheet, cells.PDF_OUTPUT_AT, formatDateTime_(now));
 
     const fieldUpdates = { [docType.col.outputLink]: pdfFile.getUrl() };
     if (docType.col.outputBy) {

@@ -28,6 +28,8 @@ function onOpen() {
     .addSeparator()
     .addItem('サイドバー自動表示を有効にする', 'enableSidebarAutoOpen')
     .addItem('サイドバー自動表示を解除する', 'disableSidebarAutoOpen')
+    .addSeparator()
+    .addItem('社印設定を確認する', 'checkSealImageSetting')
     .addToUi();
   // 単純トリガーの文脈では失敗しうるため、確実な自動オープンは
   // インストール型トリガー（onOpenInstallable）側に任せる。

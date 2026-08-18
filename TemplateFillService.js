@@ -158,19 +158,75 @@ function copyRangeAcrossSpreadsheets_(sourceRange, targetRange) {
  * （スクリプトの閲覧権限があれば取得できるため、ファイルを一般公開する必要も無い）。
  */
 function insertSealImage_(file, cells, docType) {
-  const sealProp = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
-  if (!sealProp) {
-    console.warn('COMPANY_SEAL_IMAGE_URL が未設定のため、社印画像の挿入をスキップしました。');
-    return;
-  }
-  const sealFileId = extractFileIdFromUrl_(sealProp);
-  const sealBlob = DriveApp.getFileById(sealFileId).getBlob();
+  const sealBlob = getSealImageBlob_();
+  if (!sealBlob) return; // 未設定（警告ログ済み）
 
   const sheet = getPrimarySheet_(file, docType);
   const range = sheet.getRange(cells.SEAL_IMAGE_RANGE);
   const image = sheet.insertImage(sealBlob, range.getColumn(), range.getRow());
   image.setWidth(SEAL_IMAGE_WIDTH_PX);
   image.setHeight(SEAL_IMAGE_HEIGHT_PX);
+  SpreadsheetApp.flush();
+}
+
+/**
+ * スクリプトプロパティの設定から社印画像のBlobを取得する。
+ * 未設定の場合は null を返す（＝押印をスキップ）。設定されているが取得できない場合は
+ * 原因が分かるメッセージで例外を投げる（呼び出し元が操作ログへ記録する）。
+ */
+function getSealImageBlob_() {
+  const sealProp = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
+  if (!sealProp) {
+    console.warn('COMPANY_SEAL_IMAGE_URL が未設定のため、社印画像の挿入をスキップしました。');
+    return null;
+  }
+
+  let sealFile;
+  try {
+    sealFile = DriveApp.getFileById(extractFileIdFromUrl_(sealProp));
+  } catch (e) {
+    throw AppError_('SEAL_NOT_ACCESSIBLE',
+      `社印画像ファイルを取得できません（COMPANY_SEAL_IMAGE_URL: ${sealProp}）。`
+      + `URLが正しいか、実行者がそのファイルを閲覧できるか確認してください。詳細: ${e && e.message ? e.message : e}`);
+  }
+
+  const blob = sealFile.getBlob();
+  const mimeType = blob.getContentType();
+  if (!mimeType || mimeType.indexOf('image/') !== 0) {
+    throw AppError_('SEAL_NOT_IMAGE',
+      `社印に指定されたファイル「${sealFile.getName()}」は画像ではありません（種類: ${mimeType}）。`
+      + 'PNGやJPEGなどの画像ファイルを指定してください（Googleスライド・図形描画などは不可）。');
+  }
+  return blob;
+}
+
+/**
+ * メニュー「社印設定を確認する」から呼ばれる診断用の関数。
+ * 社印画像が正しく設定・取得できるかをその場で確認し、結果をダイアログで表示する。
+ */
+function checkSealImageSetting() {
+  const ui = SpreadsheetApp.getUi();
+  const sealProp = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
+  if (!sealProp) {
+    ui.alert('社印設定の確認\n\nスクリプトプロパティ「COMPANY_SEAL_IMAGE_URL」が未設定です。\n'
+      + 'ファイル > プロジェクトの設定 > スクリプト プロパティ から、社印画像のGoogleドライブURLを設定してください。');
+    return;
+  }
+  try {
+    const blob = getSealImageBlob_();
+    ui.alert([
+      '社印設定の確認: 正常',
+      '',
+      `設定値: ${sealProp}`,
+      `種類: ${blob.getContentType()}`,
+      `サイズ: ${blob.getBytes().length} バイト`,
+      `貼り付けサイズ: ${SEAL_IMAGE_WIDTH_PX} x ${SEAL_IMAGE_HEIGHT_PX} px`,
+      '',
+      '正しく画像として取得できています。承認（納品書は作成）時に押印されます。',
+    ].join('\n'));
+  } catch (e) {
+    ui.alert(`社印設定の確認: エラー\n\n${e && e.message ? e.message : e}`);
+  }
 }
 
 /**

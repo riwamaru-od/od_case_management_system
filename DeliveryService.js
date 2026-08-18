@@ -27,7 +27,9 @@ function createDeliveryForCase_(caseNo) {
     try {
       insertSealImage_(file, cells, docType);
     } catch (e) {
+      // 作成処理自体は成立させるが、押印漏れに気付けるよう操作ログにエラーとして残す
       console.warn(`社印画像の挿入に失敗しました: ${e}`);
+      appendOperationLog_(caseNo, '納品書作成（社印）', `社印画像の挿入に失敗: ${e && e.message ? e.message : e}`, true);
     }
 
     setCaseFields_(caseNo, {

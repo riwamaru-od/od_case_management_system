@@ -164,14 +164,40 @@ function parseA1Range_(a1) {
 }
 
 /**
+ * セル上に浮いている画像（社印など）が複製先へ引き継がれなかった場合に、
+ * 元シートから同じ位置・同じサイズで貼り直す。
+ * Sheet.copyTo() は別スプレッドシートへの複製時にセル上の画像を引き継がないことがあり、
+ * その場合PDFから社印が欠落してしまうため。
+ */
+function copyOverGridImagesIfMissing_(sourceSheet, targetSheet) {
+  const sourceImages = sourceSheet.getImages();
+  if (!sourceImages.length) return;
+  if (targetSheet.getImages().length >= sourceImages.length) return; // 既に引き継がれている
+
+  targetSheet.getImages().forEach(img => img.remove()); // 中途半端な引き継ぎを避けて貼り直す
+  sourceImages.forEach(img => {
+    const anchor = img.getAnchorCell();
+    const copied = targetSheet.insertImage(
+      img.getBlob(), anchor.getColumn(), anchor.getRow(),
+      img.getAnchorCellXOffset(), img.getAnchorCellYOffset()
+    );
+    copied.setWidth(img.getWidth());
+    copied.setHeight(img.getHeight());
+  });
+}
+
+/**
  * 一時スプレッドシート内に「1ページ分の印刷用シート」を1枚作る。
  * 元シートをまるごと複製したうえで、対象範囲の外側にある行・列を「非表示」にする。
  * （行・列の削除ではなく非表示にするのは、削除すると数式の参照が壊れて #REF! に
  *  なってしまうため。非表示の行・列はPDF出力の対象外になる仕様を利用している。
- *  シートごと複製するため、列幅・行高・結合セル・書式・社印画像もそのまま維持される）
+ *  シートごと複製するため、列幅・行高・結合セル・書式も維持される。
+ *  セル上の画像だけは引き継がれないことがあるため copyOverGridImagesIfMissing_ で補う）
  */
 function buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, sheetName) {
   const copied = sourceSheet.copyTo(tempSs).setName(sheetName);
+  copyOverGridImagesIfMissing_(sourceSheet, copied);
+
   const box = parseA1Range_(a1Range);
   const maxRows = copied.getMaxRows();
   const maxCols = copied.getMaxColumns();
@@ -193,7 +219,8 @@ function buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, sheetName) {
  * 新しいページから始まる」という仕様がある。そこで一時スプレッドシートを作り、
  * ページ範囲1つにつき1枚のシートを用意（範囲外は非表示）したうえで、そのファイル
  * 全体をPDF化することで「指定範囲＝1ページ」を実現している。
- * fitw/fith を両方trueにすることで、各シートが1ページに収まるよう自動縮小される。
+ * 各シートを1ページへ収めるための縮尺指定は scale=4（ページに合わせる）を使う。
+ * ※ fitw は「幅のみ」に合わせる指定で高さが溢れる。fith というパラメータは存在しない。
  * 一時ファイルは書き出し後にゴミ箱へ移動する。
  */
 function exportRangesAsPagedPdfBlob_(fileId, docType, fileName) {
@@ -210,9 +237,11 @@ function exportRangesAsPagedPdfBlob_(fileId, docType, fileName) {
     SpreadsheetApp.flush();
 
     // gid を指定しない = ファイル全体（=全シート）を対象に出力する
+    // scale=4 は「ページに合わせる」（幅・高さの両方を1ページに収める）
     const params = [
-      'format=pdf', 'size=A4', 'portrait=true', 'fitw=true', 'fith=true',
+      'format=pdf', 'size=A4', 'portrait=true', 'scale=4',
       'gridlines=false', 'printtitle=false', 'sheetnames=false',
+      'pagenum=UNDEFINED', 'attachment=false',
       'top_margin=0.3', 'bottom_margin=0.3', 'left_margin=0.3', 'right_margin=0.3',
     ].join('&');
     const url = `https://docs.google.com/spreadsheets/d/${tempSs.getId()}/export?${params}`;
