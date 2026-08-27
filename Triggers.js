@@ -22,13 +22,16 @@
  */
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('案件管理システム')
+  const ui = SpreadsheetApp.getUi();
+
+  ui.createMenu('ユーザー用システム設定')
     .addItem('サイドバーを開く', 'showSidebar')
     .addSeparator()
     .addItem('サイドバー自動表示を有効にする', 'enableSidebarAutoOpen')
     .addItem('サイドバー自動表示を解除する', 'disableSidebarAutoOpen')
-    .addSeparator()
+    .addToUi();
+
+  ui.createMenu('管理者用メニュー')
     .addItem('社印設定を確認する', 'checkSealImageSetting')
     .addItem('案件シートの構成を確認・修復する', 'checkAndRepairCaseSheets')
     .addItem('WebアプリのURLを設定する', 'setWebAppUrlFromPrompt')
