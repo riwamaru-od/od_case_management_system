@@ -1,0 +1,10 @@
+{
+  "name": "od-case-management-docs",
+  "version": "2.1.0",
+  "private": true,
+  "description": "案件管理・見積書自動作成システム ドキュメント生成スクリプト",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": { "docx": "^9.0.0" }
+}
