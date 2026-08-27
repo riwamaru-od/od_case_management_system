@@ -9,9 +9,9 @@ const C = require('./common');
 const OUT_DIR = path.join(__dirname, '..');
 
 const DOCUMENTS = [
-  { module: './spec', file: '仕様書_v2.1.docx' },
-  { module: './usermanual', file: 'ユーザー用マニュアル_v2.1.docx' },
-  { module: './setup', file: '初期設定マニュアル_v2.1.docx' },
+  { module: './spec', file: '仕様書_v2.2.docx' },
+  { module: './usermanual', file: 'ユーザー用マニュアル_v2.2.docx' },
+  { module: './setup', file: '初期設定マニュアル_v2.2.docx' },
   { module: './testchecklist', file: 'ユーザーテスト_チェックリスト_v2.1.docx' },
 ];
 
