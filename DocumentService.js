@@ -200,10 +200,18 @@ function copyOverGridImagesIfMissing_(sourceSheet, targetSheet) {
  *  なってしまうため。非表示の行・列はPDF出力の対象外になる仕様を利用している。
  *  シートごと複製するため、列幅・行高・結合セル・書式も維持される。
  *  セル上の画像だけは引き継がれないことがあるため copyOverGridImagesIfMissing_ で補う）
+ *
+ * 社印画像はセル上に浮いている画像であり、非表示行・列の中にあってもPDF出力からは
+ * 消えない（非表示はセルの内容にのみ適用され、浮動画像の描画には影響しない）ため、
+ * 2ページ目以降にも社印が写り込んでしまう。社印は1ページ目のみに残す。
  */
-function buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, sheetName) {
+function buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, sheetName, docType, isFirstPage) {
   const copied = sourceSheet.copyTo(tempSs).setName(sheetName);
   copyOverGridImagesIfMissing_(sourceSheet, copied);
+
+  if (!isFirstPage && docType.cells().SEAL_IMAGE_RANGE) {
+    removeSealImages_(copied, copied.getRange(docType.cells().SEAL_IMAGE_RANGE));
+  }
 
   const box = parseA1Range_(a1Range);
   const maxRows = copied.getMaxRows();
@@ -238,7 +246,7 @@ function exportRangesAsPagedPdfBlob_(fileId, docType, fileName) {
   try {
     const defaultSheet = tempSs.getSheets()[0];
     pageRanges.forEach((a1Range, i) => {
-      buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, `page${i + 1}`);
+      buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, `page${i + 1}`, docType, i === 0);
     });
     tempSs.deleteSheet(defaultSheet); // 複製したシートだけを残す
     SpreadsheetApp.flush();
