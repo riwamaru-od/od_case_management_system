@@ -270,6 +270,10 @@ const PDF_PAGE_RANGES = {
 // 固定の特殊選択肢を定義する。
 // ------------------------------------------------------------------
 const CONFIG_SHEET_NAME = 'config';
+// 案件シート（表示・全案件DB）側で、終了予定・請求予定のプルダウン（データ入力規則）を
+// 適用する開始行。案件データ自体はCASE_DATA_START_ROW（2行目）から始まるが、
+// プルダウンの適用範囲だけは運用上3行目からにする。
+const SCHEDULE_VALIDATION_START_ROW = 3;
 const SCHEDULE_OPTIONS_MONTHS_BEFORE = 1; // 今月の何ヶ月前から選択肢に含めるか
 const SCHEDULE_OPTIONS_MONTHS_AFTER = 6;  // 今月の何ヶ月後まで選択肢に含めるか
 const SCHEDULE_OPTIONS_FIXED_CHOICES = ['未定', '営業案件']; // 月に紐づかない固定の選択肢

@@ -54,19 +54,23 @@ function writeScheduleOptionsToConfigSheet_(sheet, options) {
   return range;
 }
 
-/** 指定シートのD列（終了予定）・E列（請求予定）へ、configシートの範囲を参照するプルダウンを設定する */
+/**
+ * 指定シートのD列（終了予定）・E列（請求予定）へ、configシートの範囲を参照するプルダウンを設定する。
+ * 案件データはCASE_DATA_START_ROW（2行目）から始まるが、プルダウンの適用開始行は
+ * それとは別に SCHEDULE_VALIDATION_START_ROW（既定3行目）を使う。
+ */
 function applyScheduleDataValidation_(sheet, optionsRange) {
   const maxRows = sheet.getMaxRows();
-  if (maxRows < CASE_DATA_START_ROW) return;
-  const numRows = maxRows - CASE_DATA_START_ROW + 1;
+  if (maxRows < SCHEDULE_VALIDATION_START_ROW) return;
+  const numRows = maxRows - SCHEDULE_VALIDATION_START_ROW + 1;
 
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInRange(optionsRange, true)
     .setAllowInvalid(false)
     .build();
 
-  sheet.getRange(CASE_DATA_START_ROW, CASE_COLS.END_SCHEDULE, numRows, 1).setDataValidation(rule);
-  sheet.getRange(CASE_DATA_START_ROW, CASE_COLS.BILLING_SCHEDULE, numRows, 1).setDataValidation(rule);
+  sheet.getRange(SCHEDULE_VALIDATION_START_ROW, CASE_COLS.END_SCHEDULE, numRows, 1).setDataValidation(rule);
+  sheet.getRange(SCHEDULE_VALIDATION_START_ROW, CASE_COLS.BILLING_SCHEDULE, numRows, 1).setDataValidation(rule);
 }
 
 /**
