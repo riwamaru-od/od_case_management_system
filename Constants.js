@@ -48,7 +48,13 @@ const CASE_COLS = {
 };
 const CASE_LAST_COL = 32;
 const CASE_HEADER_ROW = 1;
-const CASE_DATA_START_ROW = 2;
+const CASE_DATA_START_ROW = 2; // 全案件DBシート用（見出しは1行目のみ、データは2行目から）
+
+// 表示シートは見出しが1〜2行目の2行にまたがっており、実際の案件データは3行目から始まる
+// （全案件DBシートとは見出しの行数が異なる）。表示シートの案件データ範囲を明示的に
+// 扱う処理（範囲一括クリア・件数集計など）はこちらを使うこと。
+// SCHEDULE_VALIDATION_START_ROW（下記）も同じ理由で3になっている。
+const CASE_UI_DATA_START_ROW = 3;
 
 // ヘッダー行（1行目）の見出し。CASE_COLS と同じ並び順で定義すること。
 // メニュー「案件シートの構成を確認・修復する」（SetupService.gs）が、

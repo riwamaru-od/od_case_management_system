@@ -39,7 +39,7 @@ function findArchivablePeriods_() {
     const lastRow = uiSheet ? uiSheet.getLastRow() : 0;
     return {
       period: periodNumber,
-      activeRows: Math.max(0, lastRow - CASE_DATA_START_ROW + 1),
+      activeRows: Math.max(0, lastRow - CASE_UI_DATA_START_ROW + 1),
     };
   });
 }

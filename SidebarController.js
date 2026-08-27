@@ -81,8 +81,12 @@ function getSelectedCaseNo_() {
   // 一方の解決に失敗しても（例: 未整備の期でDBシートが見つからない等）、
   // もう一方の判定を道連れにして失敗させないようにするため。
   let isUiOrDbSheet = false;
+  let dataStartRow = CASE_DATA_START_ROW;
   try {
-    isUiOrDbSheet = activeSheet.getSheetId() === getActiveUiSheet_().getSheetId();
+    if (activeSheet.getSheetId() === getActiveUiSheet_().getSheetId()) {
+      isUiOrDbSheet = true;
+      dataStartRow = CASE_UI_DATA_START_ROW;
+    }
   } catch (e) {}
   if (!isUiOrDbSheet) {
     try {
@@ -93,7 +97,7 @@ function getSelectedCaseNo_() {
 
   try {
     const row = ss.getActiveRange() && ss.getActiveRange().getRow();
-    if (!row || row < CASE_DATA_START_ROW) return null;
+    if (!row || row < dataStartRow) return null;
 
     const caseNo = activeSheet.getRange(row, CASE_COLS.CASE_NO).getValue();
     return caseNo ? String(caseNo).trim() : null;

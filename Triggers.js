@@ -79,7 +79,7 @@ function onEditInstallable(e) {
     const sheet = e.range.getSheet();
     const activeUiSheet = getActiveUiSheet_();
     if (sheet.getSheetId() !== activeUiSheet.getSheetId()) return;
-    if (e.range.getRow() < CASE_DATA_START_ROW) return;
+    if (e.range.getRow() < CASE_UI_DATA_START_ROW) return;
 
     const editedCol = e.range.getColumn();
     const editedColEnd = e.range.getLastColumn();
