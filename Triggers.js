@@ -31,6 +31,7 @@ function onOpen() {
     .addSeparator()
     .addItem('社印設定を確認する', 'checkSealImageSetting')
     .addItem('案件シートの構成を確認・修復する', 'checkAndRepairCaseSheets')
+    .addItem('WebアプリのURLを設定する', 'setWebAppUrlFromPrompt')
     .addSeparator()
     .addItem('今すぐバックアップを作成する', 'createDatabaseBackupManually')
     .addItem('過去期のデータをアーカイブする', 'archiveOldPeriodSheetsManually')

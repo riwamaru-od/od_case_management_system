@@ -52,8 +52,21 @@ function withLock_(actionLabel, fn, caseNo) {
   }
 }
 
+/**
+ * callAsAdmin_ 経由（Webアプリ・管理用アカウント権限での実行）の間だけ、
+ * 呼び出し元本人のメールアドレスを一時的に保持する。WebAppEntry.gs の doPost が設定・解除する。
+ *
+ * 背景: このWebアプリは access: ANYONE でデプロイしている（Workspaceドメインが無いため
+ * access: DOMAIN が使えず、DOMAIN指定時は Session.getActiveUser() が呼び出し元の身元を
+ * 返す一方、ANYONE指定時はGoogle側がその身元をスクリプトへ渡さない仕様のため）。
+ * そのため本人確認は「呼び出し元自身の（本来の）実行コンテキストで getActiveUserEmail_() を
+ * 呼んで得た値を、callAsAdmin_ がリクエストに含めて転送する」方式で代替している。
+ */
+let ACTIVE_USER_EMAIL_OVERRIDE_ = null;
+
 /** 現在の実行ユーザーのメールアドレス */
 function getActiveUserEmail_() {
+  if (ACTIVE_USER_EMAIL_OVERRIDE_) return ACTIVE_USER_EMAIL_OVERRIDE_;
   const email = Session.getActiveUser().getEmail();
   if (!email) {
     throw AppError_('NO_USER', 'ユーザー情報を取得できませんでした。Google アカウントでログインしているか確認してください。');

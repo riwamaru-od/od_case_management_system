@@ -37,6 +37,11 @@ const PROP_KEYS = {
   // 別のアカウントで書類が作成された場合は、操作ログにエラーとして記録される
   // （TemplateFillService.gs の verifyAdminAccountExecution_ 参照）。
   ADMIN_TRIGGER_ACCOUNT_EMAIL: 'ADMIN_TRIGGER_ACCOUNT_EMAIL',
+  // Webアプリとしてデプロイした際のURL（.../exec 形式）。callAsAdmin_（AdminProxyService.gs）が
+  // 書き込み系操作を管理用アカウント権限で実行するために参照する。
+  // デプロイIDが変わるたびに更新が必要（クイックデプロイ「テストとして実行」のURLではなく、
+  // 通常のデプロイで発行される安定したURLを設定すること）。
+  WEBAPP_URL: 'WEBAPP_URL',
 };
 
 /**

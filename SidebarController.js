@@ -203,25 +203,29 @@ function buildHistoryList_(caseInfo) {
 // ------------------------------------------------------------------
 // アクション用の薄いラッパー。例外は AppError_ のまま投げ、
 // クライアント側では withFailureHandler(error => alert(error.message)) で受ける。
+//
+// 全て callAsAdmin_ 経由で、実処理は管理用アカウント権限で実行される
+// （AdminProxyService.gs / WebAppEntry.gs 参照。案件シートの自動書き込み列の保護や、
+//  書類ファイルのオーナーを管理用アカウントに統一するための仕組み）。
 // ------------------------------------------------------------------
 
-function api_createQuote(caseNo) { return createDocumentForCase_('quote', caseNo); }
-function api_completeQuote(caseNo, comment) { return completeDocumentForCase_('quote', caseNo, comment); }
-function api_approveQuote(caseNo, comment) { return approveDocumentForCase_('quote', caseNo, comment); }
-function api_rejectQuote(caseNo, comment) { return rejectDocumentForCase_('quote', caseNo, comment); }
-function api_recreateQuote(caseNo) { return recreateDocumentForCase_('quote', caseNo); }
-function api_exportQuotePdf(caseNo) { return exportDocumentPdfForCase_('quote', caseNo); }
+function api_createQuote(caseNo) { return callAsAdmin_('createQuote', { caseNo }); }
+function api_completeQuote(caseNo, comment) { return callAsAdmin_('completeQuote', { caseNo, comment }); }
+function api_approveQuote(caseNo, comment) { return callAsAdmin_('approveQuote', { caseNo, comment }); }
+function api_rejectQuote(caseNo, comment) { return callAsAdmin_('rejectQuote', { caseNo, comment }); }
+function api_recreateQuote(caseNo) { return callAsAdmin_('recreateQuote', { caseNo }); }
+function api_exportQuotePdf(caseNo) { return callAsAdmin_('exportQuotePdf', { caseNo }); }
 
-function api_createInvoice(caseNo) { return createDocumentForCase_('invoice', caseNo); }
-function api_completeInvoice(caseNo, comment) { return completeDocumentForCase_('invoice', caseNo, comment); }
-function api_approveInvoice(caseNo, comment) { return approveDocumentForCase_('invoice', caseNo, comment); }
-function api_rejectInvoice(caseNo, comment) { return rejectDocumentForCase_('invoice', caseNo, comment); }
-function api_recreateInvoice(caseNo) { return recreateDocumentForCase_('invoice', caseNo); }
-function api_exportInvoicePdf(caseNo) { return exportDocumentPdfForCase_('invoice', caseNo); }
+function api_createInvoice(caseNo) { return callAsAdmin_('createInvoice', { caseNo }); }
+function api_completeInvoice(caseNo, comment) { return callAsAdmin_('completeInvoice', { caseNo, comment }); }
+function api_approveInvoice(caseNo, comment) { return callAsAdmin_('approveInvoice', { caseNo, comment }); }
+function api_rejectInvoice(caseNo, comment) { return callAsAdmin_('rejectInvoice', { caseNo, comment }); }
+function api_recreateInvoice(caseNo) { return callAsAdmin_('recreateInvoice', { caseNo }); }
+function api_exportInvoicePdf(caseNo) { return callAsAdmin_('exportInvoicePdf', { caseNo }); }
 
-function api_createDelivery(caseNo) { return createDeliveryForCase_(caseNo); }
-function api_exportDeliveryPdf(caseNo) { return exportDocumentPdfForCase_('delivery', caseNo); }
+function api_createDelivery(caseNo) { return callAsAdmin_('createDelivery', { caseNo }); }
+function api_exportDeliveryPdf(caseNo) { return callAsAdmin_('exportDeliveryPdf', { caseNo }); }
 
-function api_cancelCase(caseNo, comment) { return cancelCaseForCase_(caseNo, comment); }
+function api_cancelCase(caseNo, comment) { return callAsAdmin_('cancelCase', { caseNo, comment }); }
 
-function api_finalApprove(caseNo, comment) { return finalApproveForCase_(caseNo, comment); }
+function api_finalApprove(caseNo, comment) { return callAsAdmin_('finalApprove', { caseNo, comment }); }

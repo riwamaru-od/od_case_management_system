@@ -84,3 +84,33 @@ function checkAndRepairCaseSheets() {
     `必要な列数: ${CASE_LAST_COL}列（A〜${columnIndexToLetter_(CASE_LAST_COL)}）`,
   ].join('\n'));
 }
+
+/**
+ * WEBAPP_URL スクリプトプロパティを設定する（見出しUIなしで呼べる版）。
+ * 新しいデプロイを作成してURLが変わった場合、この関数の再実行が必要
+ * （メニューの「WebアプリのURLを設定する」からも呼べる）。
+ */
+function setWebAppUrl_(url) {
+  const trimmed = String(url || '').trim();
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(trimmed)) {
+    throw AppError_('INVALID_WEBAPP_URL', `WebアプリのURLの形式が正しくありません: ${trimmed}`);
+  }
+  PropertiesService.getScriptProperties().setProperty(PROP_KEYS.WEBAPP_URL, trimmed);
+}
+
+/** メニュー「WebアプリのURLを設定する」から呼ばれる */
+function setWebAppUrlFromPrompt() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    'WebアプリのURLを設定',
+    '新しくデプロイした際に発行された、".../exec" で終わるURLを貼り付けてください。',
+    ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  try {
+    setWebAppUrl_(response.getResponseText());
+    ui.alert('設定しました。');
+  } catch (e) {
+    ui.alert(`設定に失敗しました。\n\n${e && e.message ? e.message : e}`);
+  }
+}
