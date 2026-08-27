@@ -75,14 +75,45 @@ function getStaffDbSheet_() {
   return getMainSpreadsheet_().getSheetByName(getProp_(PROP_KEYS.SHEET_NAME_STAFF_DB));
 }
 
+/**
+ * IDでDriveフォルダを取得する。アクセスできない場合は、原因（フォルダの共有設定が
+ * 足りない可能性が高い）が分かるメッセージで例外を投げる。
+ * 一般社員が書類を作成する際も、このフォルダを閲覧・編集できる必要があるため、
+ * 初期設定時に対象フォルダを全利用者へ共有しておくこと（初期設定マニュアル参照）。
+ */
+function getFolderByIdSafe_(id, label) {
+  try {
+    return DriveApp.getFolderById(id);
+  } catch (e) {
+    throw AppError_('DRIVE_ACCESS_DENIED',
+      `${label}（フォルダID: ${id}）にアクセスできません。実行アカウントがこのフォルダを`
+      + `閲覧・編集できる権限を持っているか確認してください。管理用アカウントのみに`
+      + `共有されたままで、一般社員へ共有されていない可能性があります。`
+      + `詳細: ${e && e.message ? e.message : e}`);
+  }
+}
+
+/** IDでDriveファイルを取得する。アクセスできない場合の挙動は getFolderByIdSafe_ と同様。 */
+function getFileByIdSafe_(id, label) {
+  try {
+    return DriveApp.getFileById(id);
+  } catch (e) {
+    throw AppError_('DRIVE_ACCESS_DENIED',
+      `${label}（ファイルID: ${id}）にアクセスできません。実行アカウントがこのファイルを`
+      + `閲覧できる権限を持っているか確認してください。管理用アカウントのみに`
+      + `共有されたままで、一般社員へ共有されていない可能性があります。`
+      + `詳細: ${e && e.message ? e.message : e}`);
+  }
+}
+
 /** 各書類のルートフォルダを取得 */
 function getRootFolder_(kind) {
   const map = {
-    quote: PROP_KEYS.FOLDER_ID_QUOTE_ROOT,
-    invoice: PROP_KEYS.FOLDER_ID_INVOICE_ROOT,
-    delivery: PROP_KEYS.FOLDER_ID_DELIVERY_ROOT,
+    quote: { key: PROP_KEYS.FOLDER_ID_QUOTE_ROOT, label: '見積書ルートフォルダ' },
+    invoice: { key: PROP_KEYS.FOLDER_ID_INVOICE_ROOT, label: '請求書ルートフォルダ' },
+    delivery: { key: PROP_KEYS.FOLDER_ID_DELIVERY_ROOT, label: '納品書ルートフォルダ' },
   };
-  return DriveApp.getFolderById(getProp_(map[kind]));
+  return getFolderByIdSafe_(getProp_(map[kind].key), map[kind].label);
 }
 
 /** 各書類のテンプレートファイルIDを取得 */
@@ -102,10 +133,10 @@ function getAdminTriggerAccountEmail_() {
 
 /** 過去期アーカイブの保存先フォルダを取得 */
 function getArchiveFolder_() {
-  return DriveApp.getFolderById(getProp_(PROP_KEYS.FOLDER_ID_ARCHIVE_ROOT));
+  return getFolderByIdSafe_(getProp_(PROP_KEYS.FOLDER_ID_ARCHIVE_ROOT), 'アーカイブフォルダ');
 }
 
 /** バックアップの保存先フォルダを取得 */
 function getBackupFolder_() {
-  return DriveApp.getFolderById(getProp_(PROP_KEYS.FOLDER_ID_BACKUP_ROOT));
+  return getFolderByIdSafe_(getProp_(PROP_KEYS.FOLDER_ID_BACKUP_ROOT), 'バックアップフォルダ');
 }

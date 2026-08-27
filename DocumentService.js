@@ -41,7 +41,7 @@ function createLatestDocument_(docType, caseInfo, stage) {
   verifyAdminAccountExecution_(caseInfo.caseNo, `${docType.label}作成`);
 
   const folder = getCaseDocFolder_(docType, caseInfo, stage);
-  const templateFile = DriveApp.getFileById(docType.getTemplateFileId());
+  const templateFile = getFileByIdSafe_(docType.getTemplateFileId(), `${docType.label}テンプレート`);
   const newFile = templateFile.makeCopy(`${caseInfo.caseNo}_${docType.label}`, folder);
 
   const sheet = SpreadsheetApp.openById(newFile.getId()).getSheets()[0];
