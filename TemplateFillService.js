@@ -181,6 +181,27 @@ function insertSealImage_(file, cells, docType) {
 }
 
 /**
+ * 社印画像の縦オフセット（アンカーセルの上端から画像の上端までのpx）を求める。
+ *
+ * アンカーセルの行から SEAL_IMAGE_BOTTOM_ROW までの実際の行の高さを合計すると、
+ * アンカーセルの上端から当該行の下端までの距離になる。そこから画像の高さを引けば、
+ * 画像の下端が SEAL_IMAGE_BOTTOM_ROW の下端に揃う位置が求まる。
+ * 行の高さをテンプレートから都度読むため、テンプレートの行高を変えても追従する。
+ */
+function calcSealImageOffsetY_(sheet, anchorRow) {
+  if (anchorRow > SEAL_IMAGE_BOTTOM_ROW) {
+    console.warn(`社印のアンカー行(${anchorRow})が下端合わせの行(${SEAL_IMAGE_BOTTOM_ROW})より下のため、縦位置の調整をしません。`);
+    return 0;
+  }
+  let heightToBottom = 0;
+  for (let row = anchorRow; row <= SEAL_IMAGE_BOTTOM_ROW; row++) {
+    heightToBottom += sheet.getRowHeight(row);
+  }
+  // insertImage のオフセットに負の値は指定できないため、画像の方が高い場合は0にする
+  return Math.max(0, heightToBottom - SEAL_IMAGE_HEIGHT_PX);
+}
+
+/**
  * 社印画像をシートへ挿入する。Sheet.insertImage には「2MB以下・100万画素以下」という
  * 上限があり、高解像度の社印画像はそのままでは挿入できないため、失敗した場合は
  * Driveが生成する縮小版（サムネイル）で再挑戦する。
@@ -190,8 +211,9 @@ function insertSealImage_(file, cells, docType) {
 function insertSealBlobWithFallback_(sheet, source, range) {
   const col = range.getColumn();
   const row = range.getRow();
+  const offsetY = calcSealImageOffsetY_(sheet, row);
   try {
-    return sheet.insertImage(source.blob, col, row, SEAL_IMAGE_OFFSET_X_PX, SEAL_IMAGE_OFFSET_Y_PX);
+    return sheet.insertImage(source.blob, col, row, SEAL_IMAGE_OFFSET_X_PX, offsetY);
   } catch (e) {
     console.warn(`社印画像の直接挿入に失敗したため、縮小版で再試行します: ${e}`);
     const thumbnail = getSealThumbnailBlob_(source.file);
@@ -201,7 +223,7 @@ function insertSealBlobWithFallback_(sheet, source, range) {
         + `（上限: 2MB・100万画素 / 現在: ${Math.round(source.blob.getBytes().length / 1024)}KB）。`
         + '縮小版の取得にも失敗したため、社印画像そのものを小さいPNG（例: 300x300px程度）に差し替えてください。');
     }
-    return sheet.insertImage(thumbnail, col, row, SEAL_IMAGE_OFFSET_X_PX, SEAL_IMAGE_OFFSET_Y_PX);
+    return sheet.insertImage(thumbnail, col, row, SEAL_IMAGE_OFFSET_X_PX, offsetY);
   }
 }
 

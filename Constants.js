@@ -180,8 +180,9 @@ const QUOTE_TEMPLATE_CELLS = {
   CONTACT_NAME: 'B11',      // 末尾に「様」を付けて記載
   CASE_NO: 'G1',
   SERIAL_NO: 'G6',          // この期の見積書通し番号（再作成時も新規採番）
-  // 承認後に社印画像を挿入する位置（このセルの左上が基準。実際の位置は
-  // SEAL_IMAGE_OFFSET_X_PX / SEAL_IMAGE_OFFSET_Y_PX で微調整する）
+  // 承認後に社印画像を挿入する基準セル。横位置はこのセルの左上から
+  // SEAL_IMAGE_OFFSET_X_PX 分ずらし、縦位置は SEAL_IMAGE_BOTTOM_ROW の下端に
+  // 画像の下端が揃うよう自動計算する
   SEAL_IMAGE_RANGE: 'G4',
   STAFF_NAME: 'G12',
   STAFF_EMAIL: 'G13',
@@ -287,11 +288,15 @@ const QUOTE_INVOICE_DIFF_COLOR = '#FFF2A8';
 const SEAL_IMAGE_WIDTH_PX = 150;
 const SEAL_IMAGE_HEIGHT_PX = 150;
 
-// 社印の貼り付け位置の微調整（px）。各テンプレートの *_TEMPLATE_CELLS.SEAL_IMAGE_RANGE で
-// 指定したセルの左上を基準に、この分だけ右・下へずらして配置する。
-// 「もう少し右へ」ならX、「もう少し下へ」ならYの値を増やす（負の値も指定可）。
+// 社印の横位置の微調整（px）。各テンプレートの *_TEMPLATE_CELLS.SEAL_IMAGE_RANGE で
+// 指定したセルの左上を基準に、この分だけ右へずらして配置する。
+// 「もう少し右へ」なら値を増やす（負の値も指定可）。
 const SEAL_IMAGE_OFFSET_X_PX = 60;
-const SEAL_IMAGE_OFFSET_Y_PX = 5;
+
+// 社印の下端を合わせる行。縦位置はこの行の下端に画像の下端が揃うよう、
+// 挿入時に実際の行の高さから自動計算する（calcSealImageOffsetY_ 参照）。
+// 「もう1行下げたい」ならこの値を増やす。
+const SEAL_IMAGE_BOTTOM_ROW = 13;
 
 // Sheet.insertImage には「2MB以下・100万画素以下」という上限があり、高解像度の
 // 社印画像はそのままでは挿入できない。その場合に使うDrive生成の縮小版の最大辺（px）。
