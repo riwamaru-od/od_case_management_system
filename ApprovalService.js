@@ -242,6 +242,10 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
       return { url: caseInfo[`${docTypeKey}Link`], status: docType.status.inProgress };
     }
 
+    // 再作成した時点で既存のPDFは古い版のものになるため削除する
+    // （書類の複製より先に行い、消したのに再作成に失敗した状態を避ける）
+    const trashedPdfCount = trashCaseDocPdfs_(docType, caseInfo);
+
     const file = recreateLatestDocument_(docType, caseInfo);
 
     if (docTypeKey === 'quote') {
@@ -259,9 +263,13 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
     // 再作成した版はまだ承認されていないため、再承認されるまでPDF出力を禁止する
     if (docType.col.reapprovalPending) fieldUpdates[docType.col.reapprovalPending] = formatDateTime_(new Date());
     if (docType.col.startedAt) fieldUpdates[docType.col.startedAt] = formatDateTime_(new Date());
+    // 削除したPDFへのリンクが残らないようにする（出力者・出力日時は履歴として残す）
+    if (docType.col.outputLink) fieldUpdates[docType.col.outputLink] = '';
     setCaseFields_(caseNo, fieldUpdates);
 
-    appendOperationLog_(caseNo, `${docType.label}再作成`, `URL: ${file.getUrl()}`, false);
+    const recreateLogDetail = [`URL: ${file.getUrl()}`, trashedPdfCount ? `古いPDF${trashedPdfCount}件を削除` : '']
+      .filter(Boolean).join(' / ');
+    appendOperationLog_(caseNo, `${docType.label}再作成`, recreateLogDetail, false);
 
     return { url: file.getUrl(), status: docType.status.inProgress };
   }, caseNo);
@@ -297,6 +305,10 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
     const folder = getCaseDocFolder_(docType, caseInfo, stage);
     const pdfFile = exportFileToPdf_(fileId, folder, `${docType.label}_${caseInfo.caseNo}`, docType);
 
+    // 最新版のPDFだけを残す。出力に成功してから古い方を消すことで、
+    // 出力が失敗した場合に既存のPDFまで失われないようにする
+    const trashedPdfCount = trashSupersededPdfs_(folder, pdfFile);
+
     const fieldUpdates = { [docType.col.outputLink]: pdfFile.getUrl() };
     if (docType.col.outputBy) {
       fieldUpdates[docType.col.outputBy] = staff ? staff.name : email;
@@ -308,7 +320,9 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
       markBillingCompletedIfApplicable_(caseNo);
     }
 
-    appendOperationLog_(caseNo, `${docType.label}PDF出力`, `URL: ${pdfFile.getUrl()}`, false);
+    const pdfLogDetail = [`URL: ${pdfFile.getUrl()}`, trashedPdfCount ? `古いPDF${trashedPdfCount}件を削除` : '']
+      .filter(Boolean).join(' / ');
+    appendOperationLog_(caseNo, `${docType.label}PDF出力`, pdfLogDetail, false);
 
     return { pdfUrl: pdfFile.getUrl() };
   }, caseNo);

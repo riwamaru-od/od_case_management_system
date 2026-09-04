@@ -82,6 +82,13 @@ function recreateLatestDocument_(docType, caseInfo) {
   const nextBranch = countExistingSheetVersions_(ss, docType.label) + 1;
   const dateStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd');
   oldSheet.setName(`${docType.label}_v${nextBranch}_${dateStr}`);
+  // 退避する旧版は、差し替えられて無効になった書類なので社印を外す
+  // （押印済みのまま残すと、有効な書類と見分けがつかなくなるため）
+  try {
+    removeSealImages_(oldSheet, oldSheet.getRange(docType.cells().SEAL_IMAGE_RANGE));
+  } catch (e) {
+    console.warn(`旧版シートからの社印除去に失敗しました: ${e}`);
+  }
   try {
     protectSheet_(oldSheet);
   } catch (e) {
@@ -184,6 +191,53 @@ function moveCaseDocFoldersToCancelled_(caseInfo) {
   });
 
   return movedLabels;
+}
+
+/**
+ * 案件フォルダ内にある、同名の古いPDFをゴミ箱へ移動する（最新の1つだけを残す）。
+ * PDFは出力のたびに同じ名前で新規作成されるため、そのままでは同名ファイルが積み上がる。
+ * @param {Folder} folder 案件フォルダ
+ * @param {File} keepFile 残す（今回出力した）PDF
+ * @return {number} ゴミ箱へ移動した件数
+ */
+function trashSupersededPdfs_(folder, keepFile) {
+  let count = 0;
+  const files = folder.getFilesByName(keepFile.getName());
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getId() === keepFile.getId()) continue;
+    try {
+      file.setTrashed(true);
+      count++;
+    } catch (e) {
+      console.warn(`古いPDFの削除に失敗しました(${file.getName()}): ${e}`);
+    }
+  }
+  return count;
+}
+
+/**
+ * この案件・この書類種別のPDFを、案件フォルダから探してすべてゴミ箱へ移動する。
+ * 書類を再作成した時点で、既存のPDFは古い版のものになるため削除する。
+ * 案件フォルダはステージ（未請求案件・請求中案件）をまたいで移動するため、
+ * findCaseDocFolders_ で実際の置き場所を探してから処理する。
+ * @return {number} ゴミ箱へ移動した件数
+ */
+function trashCaseDocPdfs_(docType, caseInfo) {
+  const pdfName = `${docType.label}_${caseInfo.caseNo}.pdf`;
+  let count = 0;
+  findCaseDocFolders_(docType, caseInfo, getCurrentPeriodNumber_()).forEach(folder => {
+    const files = folder.getFilesByName(pdfName);
+    while (files.hasNext()) {
+      try {
+        files.next().setTrashed(true);
+        count++;
+      } catch (e) {
+        console.warn(`古いPDFの削除に失敗しました(${pdfName}): ${e}`);
+      }
+    }
+  });
+  return count;
 }
 
 /** Drive上でファイル／フォルダを別フォルダへ移動する（親付け替え方式） */
