@@ -1,6 +1,6 @@
 {
   "name": "od-case-management-docs",
-  "version": "2.1.0",
+  "version": "2.3.0",
   "private": true,
   "description": "案件管理・見積書自動作成システム ドキュメント生成スクリプト",
   "scripts": {
