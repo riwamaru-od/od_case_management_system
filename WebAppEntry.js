@@ -49,6 +49,7 @@ const WEBAPP_ACTIONS_ = {
 
   cancelCase: p => cancelCaseForCase_(p.caseNo, p.comment),
   finalApprove: p => finalApproveForCase_(p.caseNo, p.comment),
+  restoreCase: p => restoreCaseForCase_(p.caseNo, p.comment),
 };
 
 /** Webアプリの唯一の入口。POST本文は {action, params} 形式のJSON。 */

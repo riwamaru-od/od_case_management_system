@@ -147,6 +147,8 @@ function computeButtonStates_(caseInfo, email) {
       createDelivery: disabled, exportDeliveryPdf: disabled,
       cancelCase: disabled,
       finalApprove: disabled,
+      // 終了した案件でも、権限があれば中止・最終承認を取り消して進行中へ戻せる
+      restoreCase: b(canFinalApprove, '案件を元に戻す権限がありません'),
     };
   }
 
@@ -192,6 +194,9 @@ function computeButtonStates_(caseInfo, email) {
     cancelCase: b(true, ''),
 
     finalApprove: b(bs === BILLING_STATUS.BILLED && canFinalApprove, bs !== BILLING_STATUS.BILLED ? '請求書・納品書の印刷／PDF出力が完了していません' : '最終承認の権限がありません'),
+
+    // 元に戻す対象は中止済み・最終承認済みの案件のみ（進行中の案件では戻す先が無い）
+    restoreCase: b(false, '中止済み・最終承認済みの案件のみ操作できます'),
   };
 }
 
@@ -246,3 +251,5 @@ function api_exportDeliveryPdf(caseNo) { return callAsAdmin_('exportDeliveryPdf'
 function api_cancelCase(caseNo, comment) { return callAsAdmin_('cancelCase', { caseNo, comment }); }
 
 function api_finalApprove(caseNo, comment) { return callAsAdmin_('finalApprove', { caseNo, comment }); }
+
+function api_restoreCase(caseNo, comment) { return callAsAdmin_('restoreCase', { caseNo, comment }); }
