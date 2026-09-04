@@ -89,21 +89,41 @@ function onEditInstallable(e) {
 
     const touchesNumberingCols = getCaseNumberingTriggerCols_().some(inEditedRange);
     const changedTrackedCols = getTrackedChangeCols_().filter(inEditedRange);
-    if (!touchesNumberingCols && !changedTrackedCols.length) return;
 
-    // 複数行に一括貼り付けされた場合も考慮し、範囲内の全行をチェックする
-    for (let row = e.range.getRow(); row <= e.range.getLastRow(); row++) {
-      // 変更記録は「採番済みの案件が変更された場合」のみ。採番前の入力は新規登録の
-      // 途中であり変更ではないため、自動採番より先に判定する必要がある。
-      if (changedTrackedCols.length) {
-        handleTrackedFieldEdit_(sheet, row, changedTrackedCols, e);
-      }
-      if (touchesNumberingCols) {
-        handleCaseRowEdit_(sheet, row);
+    if (touchesNumberingCols || changedTrackedCols.length) {
+      // 複数行に一括貼り付けされた場合も考慮し、範囲内の全行をチェックする
+      for (let row = e.range.getRow(); row <= e.range.getLastRow(); row++) {
+        // 変更記録は「採番済みの案件が変更された場合」のみ。採番前の入力は新規登録の
+        // 途中であり変更ではないため、自動採番より先に判定する必要がある。
+        if (changedTrackedCols.length) {
+          handleTrackedFieldEdit_(sheet, row, changedTrackedCols, e);
+        }
+        if (touchesNumberingCols) {
+          handleCaseRowEdit_(sheet, row);
+        }
       }
     }
+
+    // 行の挿入や貼り付けなどで案件番号の並びが崩れていれば、番号順へ戻す。
+    // 崩れていない場合は何もしないため、入力中に行が動くことはない。
+    // 自動採番の後に行う必要があるため、最後に実行する。
+    maintainCaseNoOrder_();
   } catch (err) {
     console.error(`onEditInstallable error: ${err && err.stack ? err.stack : err}`);
+  }
+}
+
+/**
+ * メイン画面UIシートの案件番号の並びが崩れていれば、番号順へ戻す。
+ * 並べ替えは補助的な整列処理のため、失敗しても本来の編集処理は妨げない。
+ */
+function maintainCaseNoOrder_() {
+  try {
+    withLock_('案件番号順の整列', () => {
+      sortUiSheetByCaseNoIfNeeded_();
+    });
+  } catch (e) {
+    console.warn(`案件番号順への並べ替えに失敗しました: ${e}`);
   }
 }
 

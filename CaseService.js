@@ -312,3 +312,57 @@ function cancelCaseForCase_(caseNo, comment) {
     return { status: STATUS.CANCELLED };
   }, caseNo);
 }
+
+/**
+ * メイン画面UIシートの案件行を、案件番号の昇順へ並べ直す。
+ *
+ * 中止・最終承認を取り消した案件は末尾へ書き戻されるため、そのままだと
+ * 番号順が崩れる。行の挿入や手動での並べ替えでも同様に崩れうる。
+ *
+ * 実際に並びが崩れているときだけ並べ替える。毎回無条件に並べ替えると、
+ * 利用者が新しい案件を入力している最中に行が動いてしまうため。
+ * 対象は採番済みの行が並ぶ範囲までで、その下にある入力途中の行は動かさない。
+ *
+ * @return {boolean} 並べ替えを実施した場合 true
+ */
+function sortUiSheetByCaseNoIfNeeded_() {
+  const sheet = getActiveUiSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CASE_UI_DATA_START_ROW) return false;
+
+  const numRows = lastRow - CASE_UI_DATA_START_ROW + 1;
+  const caseNos = sheet.getRange(CASE_UI_DATA_START_ROW, CASE_COLS.CASE_NO, numRows, 1)
+    .getValues()
+    .map(rowValues => String(rowValues[0] == null ? '' : rowValues[0]).trim());
+
+  // 採番済みの行が現れる最後の位置を探し、そこまでを並べ替えの対象にする
+  let lastNumberedIndex = -1;
+  for (let i = numRows - 1; i >= 0; i--) {
+    if (caseNos[i] !== '') { lastNumberedIndex = i; break; }
+  }
+  if (lastNumberedIndex < 1) return false; // 採番済みが1行以下なら並べ替える必要が無い
+
+  const target = caseNos.slice(0, lastNumberedIndex + 1);
+  if (isSortedByCaseNoAscending_(target)) return false;
+
+  sheet.getRange(CASE_UI_DATA_START_ROW, 1, target.length, CASE_LAST_COL)
+    .sort({ column: CASE_COLS.CASE_NO, ascending: true });
+  SpreadsheetApp.flush();
+  return true;
+}
+
+/**
+ * 案件番号の並びが昇順になっているかを判定する。
+ * 案件番号は「{期}-{3桁の連番}」でゼロ埋めされており、1枚のシートには
+ * 同じ期の案件しか入らないため、文字列としての比較で正しく順序を判定できる。
+ * 空欄（採番前の行）は末尾にあるのが正しい並びとみなす。
+ */
+function isSortedByCaseNoAscending_(caseNos) {
+  for (let i = 1; i < caseNos.length; i++) {
+    const previous = caseNos[i - 1];
+    const current = caseNos[i];
+    if (previous === '' && current !== '') return false;
+    if (previous !== '' && current !== '' && previous > current) return false;
+  }
+  return true;
+}

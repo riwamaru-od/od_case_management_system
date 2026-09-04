@@ -44,7 +44,10 @@ function restoreCaseForCase_(caseNo, comment) {
     }
     setCaseFields_(caseNo, fieldUpdates);
 
-    // 3. 中止時に「中止案件」フォルダへ移した書類を元の場所へ戻す
+    // 3. 末尾へ書き戻したことで崩れた並びを、案件番号順へ戻す
+    sortUiSheetByCaseNoIfNeeded_();
+
+    // 4. 中止時に「中止案件」フォルダへ移した書類を元の場所へ戻す
     const movedLabels = previousStatus === STATUS.CANCELLED
       ? moveCaseDocFoldersFromCancelled_(caseInfo) : [];
 
