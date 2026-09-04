@@ -549,7 +549,9 @@ c.push(table(
     ['朝の通知の送信時刻', 'Triggers.gs の installTriggers 内 morningScheduledTasks の atHour（既定10時）'],
     ['差分ハイライトの対象セル', 'Constants.gs の QUOTE_INVOICE_DIFF_RANGES'],
     ['差分ハイライトの色', 'Constants.gs の QUOTE_INVOICE_DIFF_COLOR'],
-    ['承認後も編集を許す範囲', 'Constants.gs の QUOTE_UNPROTECTED_RANGES_AFTER_APPROVAL（既定 J21:O54）'],
+    ['書類作成時に編集を許す範囲', 'Constants.gs の DOC_EDITABLE_RANGES（書類種別ごと）'],
+    ['見積書で常に編集を許す範囲', 'Constants.gs の QUOTE_ALWAYS_EDITABLE_RANGES（既定 J22:O47 / N53）'],
+    ['ロック時に表示する説明', 'Constants.gs の DOC_LOCK_MESSAGE'],
   ],
   [2800, 6200]
 ));
