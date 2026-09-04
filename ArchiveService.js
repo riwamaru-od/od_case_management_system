@@ -129,20 +129,74 @@ function archivePeriods_(periodNumbers) {
   });
 }
 
+/** 「その期の案件がすべて完了した日」を記録するスクリプトプロパティのキー */
+function archiveReadySinceKey_(periodNumber) {
+  return `ARCHIVE_READY_SINCE_${periodNumber}`;
+}
+
+/** 完了状態の記録を消す（案件が戻された場合と、アーカイブ完了後に呼ぶ） */
+function clearArchiveReadyMark_(periodNumber) {
+  PropertiesService.getScriptProperties().deleteProperty(archiveReadySinceKey_(periodNumber));
+}
+
+/**
+ * その期の案件がすべて完了した状態になってからの経過日数を返す。
+ * 初めて完了状態を確認した日を記録し、以降はその日からの日数を数える。
+ * @return {number} 経過日数（初回は0）
+ */
+function daysSinceArchiveReady_(periodNumber, today) {
+  const props = PropertiesService.getScriptProperties();
+  const key = archiveReadySinceKey_(periodNumber);
+  const todayText = Utilities.formatDate(today, 'Asia/Tokyo', 'yyyy/MM/dd');
+  const recorded = props.getProperty(key);
+
+  if (!recorded) {
+    props.setProperty(key, todayText);
+    return 0;
+  }
+
+  const from = new Date(`${String(recorded).replace(/-/g, '/')} 00:00:00`);
+  if (isNaN(from.getTime())) {
+    props.setProperty(key, todayText);
+    return 0;
+  }
+  const to = new Date(`${todayText} 00:00:00`);
+  return Math.round((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
+}
+
 /**
  * 日次トリガーから呼ばれる。当期より前の期のシートが残っていればアーカイブする。
  *
- * ただし、表示シートに案件が残っている期は自動アーカイブの対象外とする。
- * 期をまたいで進行中の案件がある状態でアーカイブすると、作業中の案件が
- * 作業ファイルから消えてしまうため。該当する期はメニューから手動で
- * アーカイブするか、案件を完了・中止してから翌日以降の自動処理に任せる。
+ * アーカイブするのは「その期の案件がすべて完了（最終承認または中止）し、そこから
+ * ARCHIVE_WAIT_DAYS_AFTER_CLOSED 日が経過した期」に限る。完了した当日に作業ファイルから
+ * 消してしまうと、最終承認の取り消しなどの戻し操作ができなくなるため、猶予を置いている。
+ *
+ * 猶予期間中に案件が戻された場合（最終承認の取り消しなど）は完了日の記録を消し、
+ * 改めて全件完了した日から数え直す。
  */
 function archiveOldPeriodSheetsIfNeeded_() {
   const candidates = findArchivablePeriods_();
   if (candidates.length === 0) return;
 
-  const ready = candidates.filter(entry => entry.activeRows === 0);
-  const pending = candidates.filter(entry => entry.activeRows > 0);
+  const today = new Date();
+  const ready = [];
+  const waiting = [];
+  const pending = [];
+
+  candidates.forEach(entry => {
+    if (entry.activeRows > 0) {
+      // まだ案件が残っている（または戻された）ので、完了日の記録をやり直す
+      clearArchiveReadyMark_(entry.period);
+      pending.push(entry);
+      return;
+    }
+    const elapsedDays = daysSinceArchiveReady_(entry.period, today);
+    if (elapsedDays >= ARCHIVE_WAIT_DAYS_AFTER_CLOSED) {
+      ready.push(entry);
+    } else {
+      waiting.push(entry);
+    }
+  });
 
   if (pending.length > 0) {
     const detail = pending.map(e => `${e.period}期(${e.activeRows}件)`).join('、');
@@ -151,8 +205,15 @@ function archiveOldPeriodSheetsIfNeeded_() {
       `進行中の案件が残っている期は自動アーカイブを見送りました: ${detail}`, false);
   }
 
+  if (waiting.length > 0) {
+    const detail = waiting.map(e => `${e.period}期`).join('、');
+    appendOperationLog_('', '過去期データのアーカイブ',
+      `全案件が完了したため、${ARCHIVE_WAIT_DAYS_AFTER_CLOSED}日後にアーカイブします: ${detail}`, false);
+  }
+
   if (ready.length === 0) return;
   archivePeriods_(ready.map(entry => entry.period));
+  ready.forEach(entry => clearArchiveReadyMark_(entry.period));
 }
 
 /** メニュー「過去期のデータをアーカイブする」から呼ばれる */
@@ -181,6 +242,8 @@ function archiveOldPeriodSheetsManually() {
     + lines.join('\n')
     + '\n\n退避先: アーカイブフォルダ内の「案件データ_{期}期」'
     + warning
+    + `\n\n※自動アーカイブは「その期の案件がすべて完了してから${ARCHIVE_WAIT_DAYS_AFTER_CLOSED}日後」に実行されます。`
+    + '\n　この操作は猶予を待たずに今すぐ実行します。'
     + '\n\n実行してよろしいですか？',
     ui.ButtonSet.OK_CANCEL);
   if (confirmed !== ui.Button.OK) return;
