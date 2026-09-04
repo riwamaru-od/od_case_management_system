@@ -21,6 +21,11 @@ function createDeliveryForCase_(caseNo) {
       return { url: caseInfo.deliveryLink };
     }
 
+    // 差し戻し・再作成されて再承認待ちの請求書から、納品書を作らせない
+    if (caseInfo.invoiceReapprovalPending) {
+      throw AppError_('INVALID_STATE', '請求書が再作成・差し戻し中です。請求書が再度承認されてから納品書を作成してください。');
+    }
+
     const invoiceFileId = extractFileIdFromUrl_(caseInfo.invoiceLink);
     const file = createLatestDocument_(docType, caseInfo, 'created');
     fillDeliveryDocument_(file, caseInfo, invoiceFileId);

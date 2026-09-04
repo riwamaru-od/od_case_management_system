@@ -167,7 +167,11 @@ function computeButtonStates_(caseInfo, email) {
     // 「今の版が未承認かどうか」は quoteReapprovalPending で判定する。
     exportQuotePdf: b((s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt) && !caseInfo.quoteReapprovalPending,
       caseInfo.quoteReapprovalPending ? '再作成・差し戻し後は、再度承認されるまで出力できません' : '見積書承認済み以降のみ操作できます'),
-    createInvoice: b((s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt) && !caseInfo.invoiceLink, !caseInfo.quoteApprovedAt ? '見積書承認済み以降のみ操作できます' : '既に請求書が作成されています'),
+    // 差し戻し・再作成中の見積書から請求書を作らせない（PDF出力と同じ考え方）
+    createInvoice: b((s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt)
+      && !caseInfo.quoteReapprovalPending && !caseInfo.invoiceLink,
+      caseInfo.quoteReapprovalPending ? '見積書が再作成・差し戻し中です。再度承認されてから操作してください'
+        : (!caseInfo.quoteApprovedAt ? '見積書承認済み以降のみ操作できます' : '既に請求書が作成されています')),
 
     completeInvoice: b(s === STATUS.INVOICE_IN_PROGRESS && !!caseInfo.invoiceLink && !caseInfo.invoiceRejectedAt,
       caseInfo.invoiceRejectedAt ? '差し戻し後は再作成してから操作してください' : '請求書作成中の案件のみ操作できます'),
@@ -178,7 +182,9 @@ function computeButtonStates_(caseInfo, email) {
 
     exportInvoicePdf: b(!!caseInfo.invoiceApprovedAt && !caseInfo.invoiceReapprovalPending,
       caseInfo.invoiceReapprovalPending ? '再作成・差し戻し後は、再度承認されるまで出力できません' : '請求書承認済み以降のみ操作できます'),
-    createDelivery: b(!!caseInfo.invoiceApprovedAt && !caseInfo.deliveryLink, !caseInfo.invoiceApprovedAt ? '請求書承認済み以降のみ操作できます' : '既に納品書が作成されています'),
+    createDelivery: b(!!caseInfo.invoiceApprovedAt && !caseInfo.invoiceReapprovalPending && !caseInfo.deliveryLink,
+      caseInfo.invoiceReapprovalPending ? '請求書が再作成・差し戻し中です。再度承認されてから操作してください'
+        : (!caseInfo.invoiceApprovedAt ? '請求書承認済み以降のみ操作できます' : '既に納品書が作成されています')),
 
     exportDeliveryPdf: b(!!caseInfo.deliveryLink, '納品書がまだ作成されていません'),
 

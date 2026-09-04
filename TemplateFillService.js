@@ -335,8 +335,17 @@ function checkSealImageSetting() {
  * オーナーに対する実効性が無い。書類を必ず管理用アカウントで作成し、その1アカウント
  * 以外は編集できない状態にすることで担保する（verifyAdminAccountExecution_ 参照）。
  */
-function protectSheet_(sheet) {
+/**
+ * シート全体を保護（編集不可に）する。
+ * @param {Sheet} sheet 対象シート
+ * @param {string[]} [unprotectedA1Ranges] 保護の対象外にする範囲（A1形式）。
+ *   例: 見積書は承認後も作業用エリア（J21:O54）だけは編集できるようにする。
+ */
+function protectSheet_(sheet, unprotectedA1Ranges) {
   const protection = sheet.protect().setDescription('承認済み/差し戻しにつき編集不可');
+  if (unprotectedA1Ranges && unprotectedA1Ranges.length) {
+    protection.setUnprotectedRanges(unprotectedA1Ranges.map(a1 => sheet.getRange(a1)));
+  }
   const editors = protection.getEditors();
   editors.forEach(editor => {
     try {

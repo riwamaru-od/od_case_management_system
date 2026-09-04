@@ -9,19 +9,35 @@
  * 足りないと範囲外エラーになる。この処理で事前に揃えておく。
  */
 
+/**
+ * 構成を確認・修復する対象シートの一覧（当期分 + 原本）。
+ * 表示シートと全案件DBシートでは見出しの行数が異なる（表示=1〜2行目、DB=1行目のみ）ため、
+ * シートごとに「列見出しが入る行」を持たせる。
+ */
+function getCaseSheetTargetsForSetup_() {
+  const names = getPeriodSheetNames_(getCurrentPeriodNumber_());
+  return [
+    { name: names.ui, headerRow: CASE_UI_HEADER_ROW },
+    { name: names.db, headerRow: CASE_HEADER_ROW },
+    { name: MASTER_UI_SHEET_NAME, headerRow: CASE_UI_HEADER_ROW },
+    { name: MASTER_DB_SHEET_NAME, headerRow: CASE_HEADER_ROW },
+  ];
+}
+
 /** 構成を確認・修復する対象シート名の一覧（当期分 + 原本） */
 function getCaseSheetNamesForSetup_() {
-  const names = getPeriodSheetNames_(getCurrentPeriodNumber_());
-  return [names.ui, names.db, MASTER_UI_SHEET_NAME, MASTER_DB_SHEET_NAME];
+  return getCaseSheetTargetsForSetup_().map(target => target.name);
 }
 
 /**
  * 1枚の案件シートについて、列数とヘッダーを揃える。
  * 既に入力されているヘッダーは尊重し、空欄の見出しのみを補う
  * （利用者が独自の表記に変更している場合を上書きしないため）。
+ * @param {Sheet} sheet 対象シート
+ * @param {number} headerRow 列見出しが入る行。表示シートは2行目、全案件DBは1行目。
  * @return {string[]} 実施した変更の説明（変更が無ければ空配列）
  */
-function ensureCaseSheetStructure_(sheet) {
+function ensureCaseSheetStructure_(sheet, headerRow) {
   const changes = [];
 
   const maxColumns = sheet.getMaxColumns();
@@ -30,7 +46,7 @@ function ensureCaseSheetStructure_(sheet) {
     changes.push(`列数を ${maxColumns} → ${CASE_LAST_COL} へ拡張`);
   }
 
-  const headerRange = sheet.getRange(CASE_HEADER_ROW, 1, 1, CASE_LAST_COL);
+  const headerRange = sheet.getRange(headerRow, 1, 1, CASE_LAST_COL);
   const headers = headerRange.getValues()[0];
   const filled = [];
   for (let i = 0; i < CASE_LAST_COL; i++) {
@@ -41,7 +57,7 @@ function ensureCaseSheetStructure_(sheet) {
   }
   if (filled.length > 0) {
     headerRange.setValues([headers]);
-    changes.push(`未設定のヘッダーを追加: ${filled.join('、')}`);
+    changes.push(`${headerRow}行目の未設定のヘッダーを追加: ${filled.join('、')}`);
   }
 
   return changes;
@@ -58,16 +74,16 @@ function checkAndRepairCaseSheets() {
   try {
     withLock_('案件シート構成の確認・修復', () => {
       const ss = getMainSpreadsheet_();
-      getCaseSheetNamesForSetup_().forEach(name => {
-        const sheet = ss.getSheetByName(name);
+      getCaseSheetTargetsForSetup_().forEach(target => {
+        const sheet = ss.getSheetByName(target.name);
         if (!sheet) {
-          lines.push(`× ${name}: シートが見つかりません`);
+          lines.push(`× ${target.name}: シートが見つかりません`);
           return;
         }
-        const changes = ensureCaseSheetStructure_(sheet);
+        const changes = ensureCaseSheetStructure_(sheet, target.headerRow);
         lines.push(changes.length > 0
-          ? `● ${name}: ${changes.join(' / ')}`
-          : `○ ${name}: 変更なし（正常）`);
+          ? `● ${target.name}: ${changes.join(' / ')}`
+          : `○ ${target.name}: 変更なし（正常）`);
       });
       appendOperationLog_('', '案件シート構成の確認・修復', lines.join(' | '), false);
     });
@@ -82,6 +98,7 @@ function checkAndRepairCaseSheets() {
     ...lines,
     '',
     `必要な列数: ${CASE_LAST_COL}列（A〜${columnIndexToLetter_(CASE_LAST_COL)}）`,
+    `見出しの行: 表示シート=${CASE_UI_HEADER_ROW}行目 / 全案件DB=${CASE_HEADER_ROW}行目`,
   ].join('\n'));
 }
 

@@ -20,6 +20,12 @@ function createDocumentForCase_(docTypeKey, caseNo) {
       return { url: caseInfo[`${docTypeKey}Link`] };
     }
 
+    // 差し戻し・再作成されて再承認待ちの見積書から、請求書を作らせない
+    // （サイドバー側でもボタンを非活性にしているが、権限・整合性の判定はサーバー側でも行う）
+    if (docTypeKey === 'invoice' && caseInfo.quoteReapprovalPending) {
+      throw AppError_('INVALID_STATE', '見積書が再作成・差し戻し中です。見積書が再度承認されてから請求書を作成してください。');
+    }
+
     const file = createLatestDocument_(docType, caseInfo, 'created');
 
     if (docTypeKey === 'quote') {
@@ -123,11 +129,12 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     setCellValue_(sheet, cells.APPROVED_AT, formatDateTime_(now));
     if (comment) setCellValue_(sheet, cells.APPROVE_COMMENT, comment);
 
-    // 承認されたシートを保護（編集不可にする）
-   try {
-    protectSheet_(sheet);
+    // 承認されたシートを保護（編集不可にする）。
+    // 見積書のみ、承認後も編集を続ける必要がある作業用エリアは保護対象から除く。
+    try {
+      protectSheet_(sheet, docType.unprotectedRangesAfterApproval);
     } catch (e) {
-    console.warn(`シート保護(protectSheet_)の適用に失敗しました: ${e}`);
+      console.warn(`シート保護(protectSheet_)の適用に失敗しました: ${e}`);
     }
     try {
       insertSealImage_(file, cells, docType);

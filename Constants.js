@@ -57,7 +57,7 @@ const CASE_COLS = {
   INVOICE_STARTED_AT: 36,
 };
 const CASE_LAST_COL = 36;
-const CASE_HEADER_ROW = 1;
+const CASE_HEADER_ROW = 1; // 全案件DBシート用（見出しは1行目のみ）
 const CASE_DATA_START_ROW = 2; // 全案件DBシート用（見出しは1行目のみ、データは2行目から）
 
 // 表示シートは見出しが1〜2行目の2行にまたがっており、実際の案件データは3行目から始まる
@@ -65,6 +65,11 @@ const CASE_DATA_START_ROW = 2; // 全案件DBシート用（見出しは1行目�
 // 扱う処理（範囲一括クリア・件数集計など）はこちらを使うこと。
 // SCHEDULE_VALIDATION_START_ROW（下記）も同じ理由で3になっている。
 const CASE_UI_DATA_START_ROW = 3;
+
+// 表示シートで、列ごとの見出し（CASE_HEADERS）が入るのは2行目。
+// 1行目は見出しの1段目（項目のグループ名など）で、システムからは書き換えない。
+// メニュー「案件シートの構成を確認・修復する」はこの行を対象に不足分を補う。
+const CASE_UI_HEADER_ROW = 2;
 
 // ヘッダー行（1行目）の見出し。CASE_COLS と同じ並び順で定義すること。
 // メニュー「案件シートの構成を確認・修復する」（SetupService.gs）が、
@@ -243,6 +248,11 @@ const DELIVERY_TEMPLATE_CELLS = {
   PDF_OUTPUT_BY: 'C57',
   PDF_OUTPUT_AT: 'D57',
 };
+
+// 見積書は承認するとシート全体を保護（編集不可に）するが、この範囲だけは保護しない。
+// 社内の作業用エリアであり、承認後も記入・修正を続ける必要があるため。
+// PDF出力範囲（A1:H54）の外側にあるため、取引先へ渡すPDFには影響しない。
+const QUOTE_UNPROTECTED_RANGES_AFTER_APPROVAL = ['J21:O54'];
 
 // ------------------------------------------------------------------
 // 見積書と請求書の内容差分チェック

@@ -31,6 +31,8 @@ const DOC_TYPES = {
     },
     approverRoles: REQUIRED_ROLES.APPROVE_QUOTE,
     hasApprovalStep: true,
+    // 承認後もシート保護の対象外にする範囲（Constants.gs のコメント参照）
+    unprotectedRangesAfterApproval: QUOTE_UNPROTECTED_RANGES_AFTER_APPROVAL,
     // 承認後のPDF/印刷対象フォルダは常に「未請求案件」
     folderForStage: () => SUBFOLDER.UNBILLED,
   },
