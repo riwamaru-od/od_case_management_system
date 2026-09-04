@@ -22,11 +22,14 @@ function getOrCreateOperationLogSheet_() {
  * @param {string} actionLabel 操作種別（例:「見積書作成」「最終承認」）
  * @param {string} detail 詳細（コメントやURLなど。無ければ空文字）
  * @param {boolean} isError true の場合は結果欄に「エラー」と記録する
+ * @param {string} [fallbackActorName] 実行者を特定できなかった場合に実行者欄へ記録する名称。
+ *   省略時は「システム(自動実行)」。自動処理ではなく人の操作だが実行者を特定できない場合
+ *   （シートの直接編集など）に、自動実行と誤解されないよう指定する。
  */
-function appendOperationLog_(caseNo, actionLabel, detail, isError) {
+function appendOperationLog_(caseNo, actionLabel, detail, isError, fallbackActorName) {
   const sheet = getOrCreateOperationLogSheet_();
   let email = '';
-  let name = 'システム(自動実行)';
+  let name = fallbackActorName || 'システム(自動実行)';
   try {
     email = getActiveUserEmail_();
     const staff = findStaffByEmail_(email);

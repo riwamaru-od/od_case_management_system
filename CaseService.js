@@ -54,13 +54,14 @@ function handleTrackedFieldEdit_(sheet, row, changedCols, e) {
 
   withLock_('案件情報の変更記録', () => {
     syncCaseToDb_(caseNo);
-    // インストール型トリガーはトリガーを登録した管理用アカウントとして実行されるため、
-    // そのままでは操作ログの実行者が管理用アカウントになってしまう。
     // 実際に編集した本人（e.user）が取得できる場合はその人を実行者として記録する。
+    // ただしGoogle Workspaceドメインが無い環境では e.user も Session.getActiveUser() も
+    // 空になり、編集者を特定できない。その場合は自動処理と誤解されないよう、
+    // 「システム(自動実行)」ではなく人の操作であることが分かる名称で記録する。
     const editorEmail = getEditorEmailFromEvent_(e);
     ACTIVE_USER_EMAIL_OVERRIDE_ = editorEmail || null;
     try {
-      appendOperationLog_(caseNo, '案件情報の変更', details.join(' / '), false);
+      appendOperationLog_(caseNo, '案件情報の変更', details.join(' / '), false, SHEET_EDITOR_UNKNOWN_ACTOR_NAME);
     } finally {
       ACTIVE_USER_EMAIL_OVERRIDE_ = null;
     }
