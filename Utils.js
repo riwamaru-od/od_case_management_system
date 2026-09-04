@@ -53,8 +53,14 @@ function withLock_(actionLabel, fn, caseNo) {
 }
 
 /**
- * callAsAdmin_ 経由（Webアプリ・管理用アカウント権限での実行）の間だけ、
- * 呼び出し元本人のメールアドレスを一時的に保持する。WebAppEntry.gs の doPost が設定・解除する。
+ * 「実行者本人」がスクリプトの実行アカウントと異なる場合に、本人のメールアドレスを
+ * 一時的に保持する。設定した側が必ず finally で null に戻すこと。
+ *
+ * 用途は2つ:
+ *   1. callAsAdmin_ 経由（Webアプリ・管理用アカウント権限での実行）
+ *      → WebAppEntry.gs の doPost が、呼び出し元本人のアドレスを設定する。
+ *   2. インストール型 onEdit トリガー（トリガーを登録した管理用アカウントとして実行される）
+ *      → CaseService.gs の handleTrackedFieldEdit_ が、実際に編集した本人のアドレスを設定する。
  *
  * 背景: このWebアプリは access: ANYONE でデプロイしている（Workspaceドメインが無いため
  * access: DOMAIN が使えず、DOMAIN指定時は Session.getActiveUser() が呼び出し元の身元を

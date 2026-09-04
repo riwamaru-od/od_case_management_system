@@ -71,8 +71,10 @@ function onEdit(e) {
 }
 
 /**
- * インストール型 onEdit トリガー本体。
- * メイン画面UIシート（当期分）の、採番対象列が編集された場合に自動採番を行う。
+ * インストール型 onEdit トリガー本体。メイン画面UIシート（当期分）について、
+ *   - 採番対象列が編集され5項目が揃ったら → 自動採番する
+ *   - 採番済みの案件の終了予定・請求予定・担当が変更されたら → 操作ログへ記録し全案件DBへ反映する
+ * の2つを行う。
  */
 function onEditInstallable(e) {
   try {
@@ -83,14 +85,22 @@ function onEditInstallable(e) {
 
     const editedCol = e.range.getColumn();
     const editedColEnd = e.range.getLastColumn();
-    const touchesNumberingCols = getCaseNumberingTriggerCols_().some(
-      col => col >= editedCol && col <= editedColEnd
-    );
-    if (!touchesNumberingCols) return;
+    const inEditedRange = col => col >= editedCol && col <= editedColEnd;
+
+    const touchesNumberingCols = getCaseNumberingTriggerCols_().some(inEditedRange);
+    const changedTrackedCols = getTrackedChangeCols_().filter(inEditedRange);
+    if (!touchesNumberingCols && !changedTrackedCols.length) return;
 
     // 複数行に一括貼り付けされた場合も考慮し、範囲内の全行をチェックする
     for (let row = e.range.getRow(); row <= e.range.getLastRow(); row++) {
-      handleCaseRowEdit_(sheet, row);
+      // 変更記録は「採番済みの案件が変更された場合」のみ。採番前の入力は新規登録の
+      // 途中であり変更ではないため、自動採番より先に判定する必要がある。
+      if (changedTrackedCols.length) {
+        handleTrackedFieldEdit_(sheet, row, changedTrackedCols, e);
+      }
+      if (touchesNumberingCols) {
+        handleCaseRowEdit_(sheet, row);
+      }
     }
   } catch (err) {
     console.error(`onEditInstallable error: ${err && err.stack ? err.stack : err}`);

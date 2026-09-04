@@ -15,6 +15,69 @@ function getCaseNumberingTriggerCols_() {
 }
 
 /**
+ * 採番後に変更されたら、操作ログへ記録して全案件DBへ反映する対象の列。
+ * これらは案件の進行や請求のタイミングを左右するため、いつ誰が変えたかを追えるようにする。
+ */
+function getTrackedChangeCols_() {
+  return [CASE_COLS.END_SCHEDULE, CASE_COLS.BILLING_SCHEDULE, CASE_COLS.STAFF_IN_CHARGE];
+}
+
+/**
+ * onEdit から呼ばれる。採番済みの案件について、終了予定・請求予定・担当が
+ * 変更された場合に、変更内容を操作ログへ記録し、全案件DBへ反映する。
+ * （未採番の行は「変更」ではなく新規入力の途中なので対象外。採番時の
+ *   handleCaseRowEdit_ 側で改めてDBへ同期される）
+ *
+ * @param {Sheet} sheet メイン画面UIシート
+ * @param {number} row 編集された行
+ * @param {number[]} changedCols 変更された対象列（getTrackedChangeCols_ のうち編集範囲に含まれるもの）
+ * @param {Object} e onEdit のイベントオブジェクト
+ */
+function handleTrackedFieldEdit_(sheet, row, changedCols, e) {
+  const caseNo = String(sheet.getRange(row, CASE_COLS.CASE_NO).getValue() || '').trim();
+  if (!caseNo) return;
+
+  // 変更前の値は単一セルの編集時のみ取得できる（複数セルの貼り付け時は e.oldValue が来ない）
+  const isSingleCell = e && e.range && e.range.getNumRows() === 1 && e.range.getNumColumns() === 1;
+  const formatValue = val => {
+    if (val instanceof Date) return formatDateTime_(val);
+    const text = String(val == null ? '' : val).trim();
+    return text === '' ? '（空欄）' : text;
+  };
+
+  const details = changedCols.map(col => {
+    const label = CASE_HEADERS[col - 1];
+    const after = formatValue(sheet.getRange(row, col).getValue());
+    if (!isSingleCell) return `${label}: ${after}`;
+    return `${label}: ${formatValue(e.oldValue)} → ${after}`;
+  });
+
+  withLock_('案件情報の変更記録', () => {
+    syncCaseToDb_(caseNo);
+    // インストール型トリガーはトリガーを登録した管理用アカウントとして実行されるため、
+    // そのままでは操作ログの実行者が管理用アカウントになってしまう。
+    // 実際に編集した本人（e.user）が取得できる場合はその人を実行者として記録する。
+    const editorEmail = getEditorEmailFromEvent_(e);
+    ACTIVE_USER_EMAIL_OVERRIDE_ = editorEmail || null;
+    try {
+      appendOperationLog_(caseNo, '案件情報の変更', details.join(' / '), false);
+    } finally {
+      ACTIVE_USER_EMAIL_OVERRIDE_ = null;
+    }
+  }, caseNo);
+}
+
+/** onEdit イベントから、実際に編集した利用者のメールアドレスを取得する（取れない場合は空文字） */
+function getEditorEmailFromEvent_(e) {
+  try {
+    return (e && e.user && e.user.getEmail()) || '';
+  } catch (err) {
+    console.warn(`編集者のメールアドレスを取得できませんでした: ${err}`);
+    return '';
+  }
+}
+
+/**
  * onEdit から呼ばれる。編集された行が「採番トリガー列」のいずれかで、
  * 5項目すべてが埋まっており、かつ案件番号が未採番であれば自動採番する。
  * 複数列がほぼ同時に埋まった場合はイベントごとに tryLock されるため、
