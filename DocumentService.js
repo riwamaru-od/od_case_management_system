@@ -47,51 +47,17 @@ function createLatestDocument_(docType, caseInfo, stage) {
   const sheet = SpreadsheetApp.openById(newFile.getId()).getSheets()[0];
   sheet.setName(`${docType.label}${LATEST_SUFFIX}`);
 
-  // PDF化・印刷はサイドバーの「PDF出力」に一本化する（出力者の記録・出力範囲の
-  // 制御・差分ハイライトの除去が行われるのはこの経路だけのため）
+  // 入力する範囲以外を編集不可にする
   try {
-    disableDownloadForViewers_(newFile);
+    applyInitialSheetLock_(sheet, docType);
   } catch (e) {
-    // 書類の作成自体は成立させるが、制限漏れに気付けるよう操作ログにエラーとして残す
-    console.warn(`ダウンロード・印刷・コピーの制限に失敗しました: ${e}`);
-    appendOperationLog_(caseInfo.caseNo, `${docType.label}作成（出力制限）`,
-      `ダウンロード・印刷・コピーの制限に失敗: ${e && e.message ? e.message : e}`, true);
+    // 書類の作成自体は成立させるが、ロック漏れに気付けるよう操作ログにエラーとして残す
+    console.warn(`作成時のシートロックに失敗しました: ${e}`);
+    appendOperationLog_(caseInfo.caseNo, `${docType.label}作成（ロック）`,
+      `入力範囲以外のロックに失敗: ${e && e.message ? e.message : e}`, true);
   }
 
   return newFile;
-}
-
-/**
- * 書類ファイルの「閲覧者と閲覧者（コメント可）に、ダウンロード・印刷・コピーの
- * オプションを表示する」を無効にする（Drive APIの copyRequiresWriterPermission）。
- *
- * これにより、閲覧権限しか持たない利用者はスプレッドシートの
- * 「ファイル > ダウンロード」「印刷」「コピーを作成」が使えなくなり、
- * PDF化はサイドバーの「PDF出力」経由に限定される。
- *
- * 注意: この設定が効くのは閲覧者・閲覧者（コメント可）に対してのみで、
- * 編集権限を持つ人（オーナーと、承認前の作成者）は従来どおり出力できる。
- * 承認・差し戻しの時点で restrictFileEditAccessToAdminOnly_ により
- * オーナー以外は閲覧者へ降格されるため、完成した書類には確実に効く。
- *
- * 実装メモ: DriveApp にこの設定を変更するAPIが無いため、Drive REST API を
- * 直接呼んでいる（Drive の権限はスクリプトが既に取得済み）。
- */
-function disableDownloadForViewers_(file) {
-  const response = UrlFetchApp.fetch(
-    `https://www.googleapis.com/drive/v3/files/${file.getId()}?supportsAllDrives=true`,
-    {
-      method: 'patch',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-      payload: JSON.stringify({ copyRequiresWriterPermission: true }),
-      muteHttpExceptions: true,
-    });
-
-  const code = response.getResponseCode();
-  if (code !== 200) {
-    throw new Error(`Drive APIがHTTP ${code}を返しました: ${response.getContentText().slice(0, 200)}`);
-  }
 }
 
 /**
@@ -127,6 +93,13 @@ function recreateLatestDocument_(docType, caseInfo) {
   // データ転記が完了した後に行う。
 
   newSheet.setName(`${docType.label}${LATEST_SUFFIX}`);
+  // 複製された新シートには旧版の保護（承認時に掛けた全体ロック）が付いていることがあるため、
+  // 作成直後と同じ「入力範囲以外は編集不可」の状態へ設定し直す
+  try {
+    applyInitialSheetLock_(newSheet, docType);
+  } catch (e) {
+    console.warn(`再作成した新シートのロックに失敗しました: ${e}`);
+  }
   // 複製直後の新シートは「未承認の新しいドラフト」なので、旧版から引き継がれた
   // 社印を取り除く（再承認時に改めて押印される）
   try {

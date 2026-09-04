@@ -181,6 +181,15 @@ function insertSealImage_(file, cells, docType) {
 }
 
 /**
+ * 作成直後の書類に「入力する範囲以外は編集不可」のロックを掛ける。
+ * 明細など利用者が実際に入力する範囲（DOC_EDITABLE_RANGES）だけを保護の対象外にする。
+ * スクリプト自身はファイルのオーナーとして実行されるため、保護された範囲へも転記できる。
+ */
+function applyInitialSheetLock_(sheet, docType) {
+  protectSheet_(sheet, docType.editableRanges(), DOC_LOCK_MESSAGE);
+}
+
+/**
  * 社印画像の縦オフセット（アンカーセルの上端から画像の上端までのpx）を求める。
  *
  * アンカーセルの行から SEAL_IMAGE_BOTTOM_ROW までの実際の行の高さを合計すると、
@@ -358,13 +367,30 @@ function checkSealImageSetting() {
  * 以外は編集できない状態にすることで担保する（verifyAdminAccountExecution_ 参照）。
  */
 /**
- * シート全体を保護（編集不可に）する。
+ * シートを保護（編集不可に）する。
+ *
+ * 既存のシート保護は先に取り除いてから設定し直す。保護は重ねがけすると
+ * 「どちらか一方でも保護していれば編集不可」になり、作成時のロックと承認時のロックで
+ * 編集できる範囲の意図がずれるため。
+ *
+ * 注意: 利用者へ表示される警告文（「保護されているセルやオブジェクトを編集しようとして
+ * います。…」）はGoogleが固定で表示するもので、APIから変更できない。ここで設定する
+ * description は「保護されているシートと範囲」の一覧に表示される。
+ *
  * @param {Sheet} sheet 対象シート
- * @param {string[]} [unprotectedA1Ranges] 保護の対象外にする範囲（A1形式）。
- *   例: 見積書は承認後も作業用エリア（J21:O54）だけは編集できるようにする。
+ * @param {string[]} [unprotectedA1Ranges] 保護の対象外にする範囲（A1形式）
+ * @param {string} [description] 保護の説明
  */
-function protectSheet_(sheet, unprotectedA1Ranges) {
-  const protection = sheet.protect().setDescription('承認済み/差し戻しにつき編集不可');
+function protectSheet_(sheet, unprotectedA1Ranges, description) {
+  sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(existing => {
+    try {
+      existing.remove();
+    } catch (e) {
+      console.warn(`既存のシート保護の解除に失敗しました: ${e}`);
+    }
+  });
+
+  const protection = sheet.protect().setDescription(description || '承認済み/差し戻しにつき編集不可');
   if (unprotectedA1Ranges && unprotectedA1Ranges.length) {
     protection.setUnprotectedRanges(unprotectedA1Ranges.map(a1 => sheet.getRange(a1)));
   }

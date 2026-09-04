@@ -10,6 +10,8 @@ const DOC_TYPES = {
     label: '見積書',
     folderKind: 'quote',
     cells: () => QUOTE_TEMPLATE_CELLS,
+    // 作成時に「ここ以外を編集不可」にする範囲（Constants.gs 参照）
+    editableRanges: () => DOC_EDITABLE_RANGES.quote,
     getTemplateFileId: () => getTemplateFileId_('quote'),
     col: {
       link: CASE_COLS.QUOTE_LINK,
@@ -42,6 +44,8 @@ const DOC_TYPES = {
     label: '請求書',
     folderKind: 'invoice',
     cells: () => INVOICE_TEMPLATE_CELLS,
+    // 作成時に「ここ以外を編集不可」にする範囲（Constants.gs 参照）
+    editableRanges: () => DOC_EDITABLE_RANGES.invoice,
     getTemplateFileId: () => getTemplateFileId_('invoice'),
     col: {
       link: CASE_COLS.INVOICE_LINK,
@@ -72,6 +76,8 @@ const DOC_TYPES = {
     label: '納品書',
     folderKind: 'delivery',
     cells: () => DELIVERY_TEMPLATE_CELLS,
+    // 作成時に「ここ以外を編集不可」にする範囲（Constants.gs 参照）
+    editableRanges: () => DOC_EDITABLE_RANGES.delivery,
     getTemplateFileId: () => getTemplateFileId_('delivery'),
     col: {
       link: CASE_COLS.DELIVERY_LINK,
