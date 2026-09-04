@@ -98,12 +98,15 @@ function prepareNextPeriodFolders_(periodNumber) {
 
   const quotePeriodFolder = getOrCreateSubfolder_(getRootFolder_('quote'), folderName);
   getOrCreateSubfolder_(quotePeriodFolder, SUBFOLDER.UNBILLED);
+  getOrCreateSubfolder_(quotePeriodFolder, SUBFOLDER.CANCELLED);
 
   const invoicePeriodFolder = getOrCreateSubfolder_(getRootFolder_('invoice'), folderName);
   getOrCreateSubfolder_(invoicePeriodFolder, SUBFOLDER.UNBILLED);
   getOrCreateSubfolder_(invoicePeriodFolder, SUBFOLDER.BILLING);
+  getOrCreateSubfolder_(invoicePeriodFolder, SUBFOLDER.CANCELLED);
 
-  getOrCreateSubfolder_(getRootFolder_('delivery'), folderName);
+  const deliveryPeriodFolder = getOrCreateSubfolder_(getRootFolder_('delivery'), folderName);
+  getOrCreateSubfolder_(deliveryPeriodFolder, SUBFOLDER.CANCELLED);
 }
 
 function getOrCreateSubfolder_(parentFolder, name) {

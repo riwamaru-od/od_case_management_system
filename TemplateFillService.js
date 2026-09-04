@@ -86,6 +86,15 @@ function fillInvoiceDocument_(file, caseInfo, quoteFileId) {
   setCellValue_(sheet, cells.QUOTE_SERIAL_REF, `見積書No.${quoteSerialNo}`);
 
   copyRanges_(quoteFileId, DOC_TYPES.quote, sheet, QUOTE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_INVOICE);
+
+  // 転記が終わった直後の状態（＝見積書と完全に一致している状態）を基準として、
+  // 以降に請求書側だけが編集された場合に黄色くなるよう差分ハイライトを設定する
+  try {
+    applyQuoteInvoiceDiffHighlight_(sheet, quoteFileId);
+  } catch (e) {
+    // ハイライトは補助機能のため、失敗しても請求書の作成自体は成立させる
+    console.warn(`見積書との差分ハイライトの設定に失敗しました: ${e}`);
+  }
 }
 
 /** 納品書ファイルへヘッダー一式を書き込み、請求書から本文範囲を転記する */

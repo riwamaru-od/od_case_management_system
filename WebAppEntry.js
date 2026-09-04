@@ -31,7 +31,7 @@
 /** doPost が受け付けるアクション名 → 実処理関数のマッピング（params は callAsAdmin_ が渡すオブジェクト） */
 const WEBAPP_ACTIONS_ = {
   createQuote: p => createDocumentForCase_('quote', p.caseNo),
-  completeQuote: p => completeDocumentForCase_('quote', p.caseNo, p.comment),
+  completeQuote: p => completeDocumentForCase_('quote', p.caseNo, p.comment, p.approverEmail),
   approveQuote: p => approveDocumentForCase_('quote', p.caseNo, p.comment),
   rejectQuote: p => rejectDocumentForCase_('quote', p.caseNo, p.comment),
   recreateQuote: p => recreateDocumentForCase_('quote', p.caseNo),

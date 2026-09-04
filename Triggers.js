@@ -109,6 +109,16 @@ function dailyScheduledTasks() {
   runDailyTask_('請求予定レポートの送信', sendBillingSummaryReportIfNeeded_);
 }
 
+/**
+ * 時間主導型トリガーから毎朝呼ばれる想定のエントリーポイント。
+ * 利用者が始業時に読むことを前提とした通知はこちらへまとめる
+ * （深夜0時台に動く dailyScheduledTasks とは別のトリガーで実行する）。
+ */
+function morningScheduledTasks() {
+  runDailyTask_('未承認案件レポートの送信', sendUnapprovedSummaryReportIfNeeded_);
+  runDailyTask_('放置書類アラートの送信', sendStalledDocumentAlertsIfNeeded_);
+}
+
 /** 日次処理の1項目を実行する。失敗しても後続の処理は続行し、操作ログへ記録する。 */
 function runDailyTask_(label, fn) {
   try {
@@ -181,6 +191,7 @@ function disableSidebarAutoOpen() {
 function installTriggers() {
   deleteMyTriggersByHandler_('onEditInstallable');
   deleteMyTriggersByHandler_('dailyScheduledTasks');
+  deleteMyTriggersByHandler_('morningScheduledTasks');
 
   ScriptApp.newTrigger('onEditInstallable')
     .forSpreadsheet(getMainSpreadsheet_())
@@ -192,6 +203,13 @@ function installTriggers() {
     .everyDays(1)
     .atHour(0)
     .nearMinute(30)
+    .create();
+
+  // 未承認案件レポート（毎月25日）・放置書類アラート（毎日）は始業時に読めるよう朝に送る
+  ScriptApp.newTrigger('morningScheduledTasks')
+    .timeBased()
+    .everyDays(1)
+    .atHour(8)
     .create();
 
   installSidebarAutoOpenTrigger();

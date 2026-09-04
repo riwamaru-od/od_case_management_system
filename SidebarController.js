@@ -44,6 +44,8 @@ function api_getSidebarData(preferredCaseNo) {
     caseInfo: null,
     buttons: null,
     history: [],
+    // 見積書の承認依頼時に、宛先として指定できる社員の一覧（任意指定）
+    quoteApprovers: listApproversForDocType_('quote'),
   };
 
   if (!selection) return base;
@@ -160,7 +162,11 @@ function computeButtonStates_(caseInfo, email) {
     recreateQuote: b((!!caseInfo.quoteRejectedAt || s === STATUS.QUOTE_APPROVED) && canApproveQuote,
       (!caseInfo.quoteRejectedAt && s !== STATUS.QUOTE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '見積書承認の権限がありません'),
 
-    exportQuotePdf: b(s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt, '見積書承認済み以降のみ操作できます'),
+    // 差し戻し・再作成された後は、再承認されるまでPDF出力させない（古い版のPDFが
+    // 出力されるのを防ぐ）。quoteApprovedAt は履歴として残るため、
+    // 「今の版が未承認かどうか」は quoteReapprovalPending で判定する。
+    exportQuotePdf: b((s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt) && !caseInfo.quoteReapprovalPending,
+      caseInfo.quoteReapprovalPending ? '再作成・差し戻し後は、再度承認されるまで出力できません' : '見積書承認済み以降のみ操作できます'),
     createInvoice: b((s === STATUS.QUOTE_APPROVED || !!caseInfo.quoteApprovedAt) && !caseInfo.invoiceLink, !caseInfo.quoteApprovedAt ? '見積書承認済み以降のみ操作できます' : '既に請求書が作成されています'),
 
     completeInvoice: b(s === STATUS.INVOICE_IN_PROGRESS && !!caseInfo.invoiceLink && !caseInfo.invoiceRejectedAt,
@@ -170,7 +176,8 @@ function computeButtonStates_(caseInfo, email) {
     recreateInvoice: b((!!caseInfo.invoiceRejectedAt || s === STATUS.INVOICE_APPROVED) && canApproveInvoice,
       (!caseInfo.invoiceRejectedAt && s !== STATUS.INVOICE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '請求書承認の権限がありません'),
 
-    exportInvoicePdf: b(!!caseInfo.invoiceApprovedAt, '請求書承認済み以降のみ操作できます'),
+    exportInvoicePdf: b(!!caseInfo.invoiceApprovedAt && !caseInfo.invoiceReapprovalPending,
+      caseInfo.invoiceReapprovalPending ? '再作成・差し戻し後は、再度承認されるまで出力できません' : '請求書承認済み以降のみ操作できます'),
     createDelivery: b(!!caseInfo.invoiceApprovedAt && !caseInfo.deliveryLink, !caseInfo.invoiceApprovedAt ? '請求書承認済み以降のみ操作できます' : '既に納品書が作成されています'),
 
     exportDeliveryPdf: b(!!caseInfo.deliveryLink, '納品書がまだ作成されていません'),
@@ -214,7 +221,7 @@ function buildHistoryList_(caseInfo) {
 // ------------------------------------------------------------------
 
 function api_createQuote(caseNo) { return callAsAdmin_('createQuote', { caseNo }); }
-function api_completeQuote(caseNo, comment) { return callAsAdmin_('completeQuote', { caseNo, comment }); }
+function api_completeQuote(caseNo, comment, approverEmail) { return callAsAdmin_('completeQuote', { caseNo, comment, approverEmail }); }
 function api_approveQuote(caseNo, comment) { return callAsAdmin_('approveQuote', { caseNo, comment }); }
 function api_rejectQuote(caseNo, comment) { return callAsAdmin_('rejectQuote', { caseNo, comment }); }
 function api_recreateQuote(caseNo) { return callAsAdmin_('recreateQuote', { caseNo }); }

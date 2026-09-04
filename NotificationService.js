@@ -28,9 +28,38 @@ function notifyStaff_(email, subject, body, htmlBody) {
   }
 }
 
-/** 総務ロールを持つ全員に通知（承認依頼など） */
+/** 総務ロールを持つ全員に通知（定期レポートなど） */
 function notifyAdminDept_(subject, body, htmlBody) {
   getAdminDeptStaff_().forEach(staff => sendMailNotification_(staff.email, subject, body, htmlBody));
+}
+
+/** 承認依頼の件名に付ける、承認者が指定済みであることを示す前置き */
+const APPROVER_DESIGNATED_SUBJECT_PREFIX = '*承認者指定済み* ';
+
+/**
+ * 承認依頼を通知する。
+ * 総務ロール保持者全員へ送るのは従来どおり。加えて承認者が指定されている場合は、
+ * 指定された本人へも通知し、総務宛のうち「指定された本人以外」の件名には
+ * 「*承認者指定済み*」を前置きして、自分が対応すべき依頼かを一目で判別できるようにする。
+ * @param {{subject:string, body:string, htmlBody:string}} msg 通知文面
+ * @param {string} [designatedEmail] 指定された承認者のメールアドレス（未指定なら従来どおり総務全員のみ）
+ */
+function notifyApprovalRequest_(msg, designatedEmail) {
+  const designated = designatedEmail ? findStaffByEmail_(designatedEmail) : null;
+  const adminDeptStaff = getAdminDeptStaff_();
+
+  adminDeptStaff.forEach(staff => {
+    const isDesignatedPerson = designated && staff.email === designated.email;
+    const subject = (designated && !isDesignatedPerson)
+      ? APPROVER_DESIGNATED_SUBJECT_PREFIX + msg.subject
+      : msg.subject;
+    sendMailNotification_(staff.email, subject, msg.body, msg.htmlBody);
+  });
+
+  // 指定された承認者が総務以外の場合は、その人の通知手段（Chatwork等）で個別に送る
+  if (designated && !adminDeptStaff.some(s => s.email === designated.email)) {
+    notifyStaff_(designated.email, msg.subject, msg.body, msg.htmlBody);
+  }
 }
 
 function sendMailNotification_(email, subject, body, htmlBody) {
@@ -125,7 +154,7 @@ function buildApprovalRequestMessage_(docTypeLabel, caseInfo, comment) {
   return { subject, body, htmlBody };
 }
 
-/** 承認完了通知の文面 */
+/** 承認完了通知の文面（依頼者宛。誰が承認したかが分かるよう承認者名を含める） */
 function buildApprovedMessage_(docTypeLabel, caseInfo, comment) {
   const subject = `【承認完了】${caseInfo.caseName}（${docTypeLabel}）`;
   const lines = [
@@ -138,6 +167,10 @@ function buildApprovedMessage_(docTypeLabel, caseInfo, comment) {
     { label: '案件名', value: caseInfo.caseName },
     { label: '結果', value: `${docTypeLabel}が承認されました。` },
   ];
+  if (caseInfo.approverName) {
+    lines.push(`承認者: ${caseInfo.approverName}`);
+    rows.push({ label: '承認者', value: caseInfo.approverName });
+  }
   if (comment) {
     lines.push(`承認コメント: ${comment}`);
     rows.push({ label: '承認コメント', value: comment });

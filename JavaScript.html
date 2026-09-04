@@ -23,10 +23,14 @@
     finalApprove: 'api_finalApprove',
   };
 
+  // 承認者の指定プルダウンを表示するアクション（見積書の承認依頼のみ）
+  const APPROVER_SELECT_ACTION = 'completeQuote';
+
   let currentCaseNo = null;
   let pendingCommentAction = null;
   let isBusy = false;
   let pollTimer = null;
+  let quoteApprovers = [];
 
   document.addEventListener('DOMContentLoaded', () => {
     refreshData();
@@ -44,6 +48,7 @@
 
   function renderData(data) {
     currentCaseNo = data.caseNo;
+    quoteApprovers = data.quoteApprovers || [];
     const emptyState = document.getElementById('emptyState');
     const caseArea = document.getElementById('caseArea');
 
@@ -111,7 +116,26 @@
     pendingCommentAction = action;
     document.getElementById('commentModalTitle').textContent = title;
     document.getElementById('commentText').value = '';
+    renderApproverField(action);
     document.getElementById('commentModal').classList.add('open');
+  }
+
+  /**
+   * 承認者の指定プルダウンを組み立てる（見積書の承認依頼のときだけ表示）。
+   * 未選択なら従来どおり総務全員へ通知されるため、任意項目として扱う。
+   */
+  function renderApproverField(action) {
+    const field = document.getElementById('approverField');
+    const select = document.getElementById('approverSelect');
+    if (action !== APPROVER_SELECT_ACTION || !quoteApprovers.length) {
+      field.style.display = 'none';
+      select.innerHTML = '';
+      return;
+    }
+    select.innerHTML = ['<option value="">指定しない（総務全員へ依頼）</option>']
+      .concat(quoteApprovers.map(a => `<option value="${escapeHtml(a.email)}">${escapeHtml(a.name)}</option>`))
+      .join('');
+    field.style.display = 'block';
   }
 
   function closeComment() {
@@ -124,12 +148,19 @@
     const fnName = COMMENT_ACTIONS[pendingCommentAction];
     const comment = document.getElementById('commentText').value;
     const action = pendingCommentAction;
+    // 承認者の指定は見積書の承認依頼のみ。未選択時は空文字を渡す（＝従来どおり総務全員へ）
+    const approverEmail = (action === APPROVER_SELECT_ACTION)
+      ? document.getElementById('approverSelect').value : '';
     closeComment();
     setBusy(true);
-    google.script.run
+    const runner = google.script.run
       .withSuccessHandler(result => { setBusy(false); handleActionResult(result); refreshData(currentCaseNo); })
-      .withFailureHandler(err => { setBusy(false); showToast(err && err.message ? err.message : String(err), true); })
-      [fnName](currentCaseNo, comment);
+      .withFailureHandler(err => { setBusy(false); showToast(err && err.message ? err.message : String(err), true); });
+    if (action === APPROVER_SELECT_ACTION) {
+      runner[fnName](currentCaseNo, comment, approverEmail);
+    } else {
+      runner[fnName](currentCaseNo, comment);
+    }
   }
 
   /** 印刷/出力アクションの結果としてURLが返ってきた場合、新規タブで開く */

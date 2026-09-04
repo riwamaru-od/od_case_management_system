@@ -113,6 +113,62 @@ function moveCaseDocFolderToStage_(docType, caseInfo, fromStage, toStage) {
   moveFileOrFolder_(fromFolder, toStageFolder);
 }
 
+/**
+ * 期フォルダ配下から、この案件のフォルダを探す。
+ * 書類種別によって置き場所が異なる（見積書=未請求案件／請求書=未請求案件・請求中案件／
+ * 納品書=期フォルダ直下）ため、期フォルダの直下と各ステージフォルダの両方を探索する。
+ * 移動先である「中止案件」フォルダの中は探索対象から除く。
+ */
+function findCaseDocFolders_(docType, caseInfo, periodNumber) {
+  const periodFolder = getOrCreateSubfolder_(getRootFolder_(docType.folderKind), getPeriodFolderName_(periodNumber));
+  const targetName = caseFolderName_(caseInfo);
+  const found = [];
+
+  const collectFrom = parent => {
+    const it = parent.getFoldersByName(targetName);
+    while (it.hasNext()) found.push(it.next());
+  };
+
+  collectFrom(periodFolder);
+  const subfolders = periodFolder.getFolders();
+  while (subfolders.hasNext()) {
+    const subfolder = subfolders.next();
+    if (subfolder.getName() === SUBFOLDER.CANCELLED) continue; // 移動先は除外
+    collectFrom(subfolder);
+  }
+  return found;
+}
+
+/**
+ * 案件中止時に、見積書・請求書・納品書それぞれの案件フォルダを
+ * 「{書類種別ルート}/xx期/中止案件/」配下へ移動する。
+ * @return {string[]} 移動した内容の説明（操作ログ用）
+ */
+function moveCaseDocFoldersToCancelled_(caseInfo) {
+  const periodNumber = getCurrentPeriodNumber_();
+  const movedLabels = [];
+
+  ['quote', 'invoice', 'delivery'].forEach(key => {
+    const docType = DOC_TYPES[key];
+    try {
+      const folders = findCaseDocFolders_(docType, caseInfo, periodNumber);
+      if (!folders.length) return;
+      const destination = getDocumentFolder_(docType.folderKind, periodNumber, SUBFOLDER.CANCELLED);
+      folders.forEach(folder => {
+        moveFileOrFolder_(folder, destination);
+        movedLabels.push(docType.label);
+      });
+    } catch (e) {
+      // 1種別の移動に失敗しても中止処理自体は止めない（気付けるよう操作ログへ残す）
+      console.warn(`${docType.label}フォルダの中止案件フォルダへの移動に失敗しました: ${e}`);
+      appendOperationLog_(caseInfo.caseNo, '案件中止（フォルダ移動）',
+        `${docType.label}の移動に失敗: ${e && e.message ? e.message : e}`, true);
+    }
+  });
+
+  return movedLabels;
+}
+
 /** Drive上でファイル／フォルダを別フォルダへ移動する（親付け替え方式） */
 function moveFileOrFolder_(item, destinationFolder) {
   const parents = item.getParents();
@@ -211,6 +267,13 @@ function buildSinglePagePrintSheet_(tempSs, sourceSheet, a1Range, sheetName, doc
 
   if (!isFirstPage && docType.cells().SEAL_IMAGE_RANGE) {
     removeSealImages_(copied, copied.getRange(docType.cells().SEAL_IMAGE_RANGE));
+  }
+
+  // 見積書との差分を示す黄色は社内確認用のため、取引先へ渡すPDFには出さない
+  try {
+    removeQuoteInvoiceDiffRules_(copied);
+  } catch (e) {
+    console.warn(`差分ハイライトの除去に失敗しました: ${e}`);
   }
 
   const box = parseA1Range_(a1Range);

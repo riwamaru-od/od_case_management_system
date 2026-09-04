@@ -93,6 +93,11 @@
   <div class="modal-overlay" id="commentModal">
     <div class="modal-box">
       <h3 id="commentModalTitle">コメント</h3>
+      <!-- 承認者の指定（見積書の完成＝承認依頼のときだけ表示する。任意項目） -->
+      <div id="approverField" style="display:none;">
+        <label for="approverSelect">承認者の指定（任意）</label>
+        <select id="approverSelect"></select>
+      </div>
       <textarea id="commentText" placeholder="コメントがあれば入力してください（任意）"></textarea>
       <div class="modal-actions">
         <button class="cancel" onclick="closeComment()">キャンセル</button>

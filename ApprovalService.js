@@ -11,6 +11,15 @@ function createDocumentForCase_(docTypeKey, caseNo) {
     const docType = DOC_TYPES[docTypeKey];
     const caseInfo = getCaseInfo_(caseNo);
 
+    // 二重作成の防止: 既にこの書類のファイルがある場合は作り直さず、既存のURLを返す。
+    // （同じ作成リクエストが稀に二重で届き、同じ案件のファイルが2つできる事象への対策。
+    //  getCaseInfo_ も含めて withLock_ の中で判定しているため、ほぼ同時に2件届いた場合も
+    //  1件目の書き込み後に2件目がここで弾かれる）
+    if (caseInfo[`${docTypeKey}Link`]) {
+      appendOperationLog_(caseNo, `${docType.label}作成`, '既に作成済みのため作成をスキップしました（二重実行の防止）', false);
+      return { url: caseInfo[`${docTypeKey}Link`] };
+    }
+
     const file = createLatestDocument_(docType, caseInfo, 'created');
 
     if (docTypeKey === 'quote') {
@@ -25,6 +34,8 @@ function createDocumentForCase_(docTypeKey, caseNo) {
       [CASE_COLS.STATUS]: docType.status.inProgress,
     };
     if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = '';
+    if (docType.col.reapprovalPending) fieldUpdates[docType.col.reapprovalPending] = '';
+    if (docType.col.startedAt) fieldUpdates[docType.col.startedAt] = formatDateTime_(new Date());
     setCaseFields_(caseNo, fieldUpdates);
 
     appendOperationLog_(caseNo, `${docType.label}作成`, `URL: ${file.getUrl()}`, false);
@@ -38,10 +49,19 @@ function createDocumentForCase_(docTypeKey, caseNo) {
  * 総務へ承認依頼を送信し、作成者・作成日時を記録して「作成済み」ステータスにする。
  * comment はダイアログで入力された承認依頼時コメント（テンプレートのN56/F56相当へ転記）。
  */
-function completeDocumentForCase_(docTypeKey, caseNo, comment) {
+function completeDocumentForCase_(docTypeKey, caseNo, comment, approverEmail) {
   return withLock_(`${DOC_TYPES[docTypeKey].label}の完成`, () => {
     const docType = DOC_TYPES[docTypeKey];
     const caseInfo = getCaseInfo_(caseNo);
+
+    // 承認者の指定は任意。指定された場合のみ、その人が承認権限を持つか検証する
+    const designatedApprover = approverEmail ? findStaffByEmail_(approverEmail) : null;
+    if (approverEmail && !designatedApprover) {
+      throw AppError_('APPROVER_NOT_FOUND', `指定された承認者（${approverEmail}）が社員DBに見つかりません。`);
+    }
+    if (designatedApprover && !hasAnyRole_(designatedApprover.email, docType.approverRoles)) {
+      throw AppError_('APPROVER_NO_ROLE', `${designatedApprover.name}さんは${docType.label}の承認権限を持っていません。`);
+    }
 
     // 差し戻し後、再作成せずに同じ書類のまま承認依頼を再送することを防ぐ
     // （差し戻された旧シートは protectSheet_ でロック済みのため、再作成せずに
@@ -74,9 +94,11 @@ function completeDocumentForCase_(docTypeKey, caseNo, comment) {
       caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, clientName: caseInfo.clientName,
       requesterName: staff ? staff.name : email, docUrl: file.getUrl(),
     }, comment);
-    notifyAdminDept_(msg.subject, msg.body, msg.htmlBody);
+    notifyApprovalRequest_(msg, designatedApprover ? designatedApprover.email : '');
 
-    appendOperationLog_(caseNo, `${docType.label}完成（承認依頼）`, comment || '', false);
+    const logDetail = [comment || '', designatedApprover ? `承認者指定: ${designatedApprover.name}` : '']
+      .filter(Boolean).join(' / ');
+    appendOperationLog_(caseNo, `${docType.label}完成（承認依頼）`, logDetail, false);
 
     return { status: docType.status.drafted };
   }, caseNo);
@@ -116,11 +138,15 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     }
 
 
-    setCaseFields_(caseNo, {
-      [docType.col.approver]: staff ? staff.name : email,
+    const approverName = staff ? staff.name : email;
+    const approvalUpdates = {
+      [docType.col.approver]: approverName,
       [docType.col.approvedAt]: formatDateTime_(now),
       [CASE_COLS.STATUS]: docType.status.approved,
-    });
+    };
+    // 再承認が完了したのでフラグを解除する（＝PDF出力ボタンが再び活性になる）
+    if (docType.col.reapprovalPending) approvalUpdates[docType.col.reapprovalPending] = '';
+    setCaseFields_(caseNo, approvalUpdates);
 
     if (docTypeKey === 'invoice') {
       // 請求書は承認済み以降、フォルダを「未請求案件」→「請求中案件」へ移動
@@ -139,6 +165,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     const creatorStaff = getAllStaff_().find(s => s.name === caseInfo[`${docTypeKey}Creator`]);
     const notifyMsg = buildApprovedMessage_(docType.label, {
       caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, docUrl: file.getUrl(),
+      approverName: approverName,
     }, comment);
     if (creatorStaff) notifyStaff_(creatorStaff.email, notifyMsg.subject, notifyMsg.body, notifyMsg.htmlBody);
 
@@ -178,6 +205,9 @@ function rejectDocumentForCase_(docTypeKey, caseNo, comment) {
 
     const fieldUpdates = { [CASE_COLS.STATUS]: docType.status.inProgress };
     if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = formatDateTime_(new Date());
+    // 差し戻された版は承認されていないため、再承認されるまでPDF出力を禁止する
+    // （過去に一度承認された書類を再作成→差し戻し、という流れでも確実に止める）
+    if (docType.col.reapprovalPending) fieldUpdates[docType.col.reapprovalPending] = formatDateTime_(new Date());
     setCaseFields_(caseNo, fieldUpdates);
 
     appendOperationLog_(caseNo, `${docType.label}差し戻し`, comment || '', false);
@@ -194,6 +224,17 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
     assertRole_(email, docType.approverRoles, `${docType.label}承認`);
 
     const caseInfo = getCaseInfo_(caseNo);
+
+    // 二重実行の防止: 同じ再作成リクエストが二重で届くと、1ファイル内に同じ版の
+    // シートが2枚積み上がってしまう。着手日時（分単位）が今と同じであれば、
+    // 直前の実行と同一の要求とみなして何もしない。
+    // getCaseInfo_ も含めて withLock_ の中で判定しているため、ほぼ同時に届いた場合も
+    // 1件目の書き込み後に2件目がここで弾かれる。
+    if (docType.col.startedAt && caseInfo[`${docTypeKey}StartedAt`] === formatDateTime_(new Date())) {
+      appendOperationLog_(caseNo, `${docType.label}再作成`, '直前の再作成と同一の要求のためスキップしました（二重実行の防止）', false);
+      return { url: caseInfo[`${docTypeKey}Link`], status: docType.status.inProgress };
+    }
+
     const file = recreateLatestDocument_(docType, caseInfo);
 
     if (docTypeKey === 'quote') {
@@ -208,6 +249,9 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
       [CASE_COLS.STATUS]: docType.status.inProgress,
     };
     if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = '';
+    // 再作成した版はまだ承認されていないため、再承認されるまでPDF出力を禁止する
+    if (docType.col.reapprovalPending) fieldUpdates[docType.col.reapprovalPending] = formatDateTime_(new Date());
+    if (docType.col.startedAt) fieldUpdates[docType.col.startedAt] = formatDateTime_(new Date());
     setCaseFields_(caseNo, fieldUpdates);
 
     appendOperationLog_(caseNo, `${docType.label}再作成`, `URL: ${file.getUrl()}`, false);

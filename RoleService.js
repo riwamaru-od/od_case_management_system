@@ -77,6 +77,18 @@ function listStaffNames_() {
   return getAllStaff_().map(s => s.name);
 }
 
+/**
+ * 承認依頼先として指定できる社員の一覧を返す（サイドバーのプルダウン用）。
+ * 対象は、その書類種別の承認操作が可能なロール（見積書なら「見積書承認」「Admin」「総務」）
+ * を1つ以上持ち、メールアドレスが登録されている社員。
+ */
+function listApproversForDocType_(docTypeKey) {
+  const roles = DOC_TYPES[docTypeKey].approverRoles;
+  return getAllStaff_()
+    .filter(s => s.email && roles.some(role => s.roles.indexOf(role) !== -1))
+    .map(s => ({ name: s.name, email: s.email }));
+}
+
 /** 総務ロールを持つ全員（承認依頼のメール通知先） */
 function getAdminDeptStaff_() {
   return getAllStaff_().filter(s => s.roles.indexOf(ROLES.ADMIN_DEPT) !== -1 || s.roles.indexOf(ROLES.ADMIN) !== -1);

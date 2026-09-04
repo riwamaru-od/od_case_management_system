@@ -110,6 +110,15 @@ function getCaseInfo_(caseNo) {
     // 差し戻し済みフラグ（内部用）。空でなければ「差し戻し後、未再作成」の状態を表す。
     quoteRejectedAt: get(CASE_COLS.QUOTE_REJECTED_AT),
     invoiceRejectedAt: get(CASE_COLS.INVOICE_REJECTED_AT),
+    // 再承認待ちフラグ（内部用）。空でなければ「差し戻し・再作成されて以降、まだ再承認
+    // されていない」状態を表す。PDF出力ボタンの活性判定に使う（過去の承認記録は
+    // quoteApprovedAt 等にそのまま残るため、履歴表示には影響しない）。
+    quoteReapprovalPending: get(CASE_COLS.QUOTE_REAPPROVAL_PENDING),
+    invoiceReapprovalPending: get(CASE_COLS.INVOICE_REAPPROVAL_PENDING),
+    // 着手日時（書類ファイルを作成・再作成した日時）。作成中のまま放置されている
+    // 書類の経過日数判定に使う（ReportService.gs）。
+    quoteStartedAt: get(CASE_COLS.QUOTE_STARTED_AT),
+    invoiceStartedAt: get(CASE_COLS.INVOICE_STARTED_AT),
     _row: row,
   };
 }
@@ -170,8 +179,21 @@ function removeCaseFromUiAfterFinalApproval_(caseNo) {
  * 最終承認の削除処理（removeCaseFromUiAfterFinalApproval_）とは独立した処理として持つ。
  */
 function cancelCaseForCase_(caseNo, comment) {
+  // 見積書が未作成の場合は、中止の記録として先に見積書を作成しておく（作成のみ。
+  // 完成＝承認依頼は行わない）。createDocumentForCase_ は自身で withLock_ を取得するため、
+  // ロックの入れ子を避けて中止処理のロックを取る前に呼び出す。
+  let autoCreatedQuote = false;
+  if (!getCaseInfo_(caseNo).quoteLink) {
+    createDocumentForCase_('quote', caseNo);
+    autoCreatedQuote = true;
+  }
+
   return withLock_('案件中止', () => {
     setCaseFields_(caseNo, { [CASE_COLS.STATUS]: STATUS.CANCELLED });
+
+    // 全書類の案件フォルダを「中止案件」フォルダ配下へ移動する
+    // （UI行を消す前に、案件名を含むフォルダ名を解決できる状態で行う）
+    const movedLabels = moveCaseDocFoldersToCancelled_(getCaseInfo_(caseNo));
 
     const uiSheet = getActiveUiSheet_();
     syncCaseToDb_(caseNo); // 念のため最新状態をDBへバックアップ
@@ -180,7 +202,10 @@ function cancelCaseForCase_(caseNo, comment) {
       uiSheet.deleteRow(row);
     }
 
-    appendOperationLog_(caseNo, '案件中止', comment || '', false);
+    const details = [comment || ''];
+    if (autoCreatedQuote) details.push('見積書が未作成だったため自動作成しました');
+    if (movedLabels.length) details.push(`中止案件フォルダへ移動: ${movedLabels.join('・')}`);
+    appendOperationLog_(caseNo, '案件中止', details.filter(Boolean).join(' / '), false);
 
     return { status: STATUS.CANCELLED };
   }, caseNo);

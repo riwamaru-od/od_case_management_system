@@ -21,6 +21,8 @@ const DOC_TYPES = {
       outputBy: CASE_COLS.QUOTE_OUTPUT_BY,
       outputAt: CASE_COLS.QUOTE_OUTPUT_AT,
       rejectedAt: CASE_COLS.QUOTE_REJECTED_AT,
+      reapprovalPending: CASE_COLS.QUOTE_REAPPROVAL_PENDING,
+      startedAt: CASE_COLS.QUOTE_STARTED_AT,
     },
     status: {
       inProgress: STATUS.QUOTE_IN_PROGRESS,
@@ -49,6 +51,8 @@ const DOC_TYPES = {
       outputBy: CASE_COLS.INVOICE_OUTPUT_BY,
       outputAt: CASE_COLS.INVOICE_OUTPUT_AT,
       rejectedAt: CASE_COLS.INVOICE_REJECTED_AT,
+      reapprovalPending: CASE_COLS.INVOICE_REAPPROVAL_PENDING,
+      startedAt: CASE_COLS.INVOICE_STARTED_AT,
     },
     status: {
       inProgress: STATUS.INVOICE_IN_PROGRESS,

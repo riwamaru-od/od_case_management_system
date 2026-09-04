@@ -14,6 +14,13 @@ function createDeliveryForCase_(caseNo) {
     const staff = findStaffByEmail_(email);
     const now = new Date();
 
+    // 二重作成の防止: 既に納品書がある場合は作り直さず、既存のURLを返す
+    // （createDocumentForCase_ と同じ考え方。ApprovalService.gs のコメント参照）
+    if (caseInfo.deliveryLink) {
+      appendOperationLog_(caseNo, '納品書作成', '既に作成済みのため作成をスキップしました（二重実行の防止）', false);
+      return { url: caseInfo.deliveryLink };
+    }
+
     const invoiceFileId = extractFileIdFromUrl_(caseInfo.invoiceLink);
     const file = createLatestDocument_(docType, caseInfo, 'created');
     fillDeliveryDocument_(file, caseInfo, invoiceFileId);
