@@ -97,18 +97,56 @@ function handleCaseRowEdit_(sheet, row) {
     const current = sheet.getRange(row, CASE_COLS.CASE_NO).getValue();
     if (current) return;
 
-    const period = getCurrentPeriodNumber_();
-    const seq = nextSequence_(seqKey_('CASE', period));
-    const caseNo = `${period}-${pad3_(seq)}`;
+    const caseNo = generateUniqueCaseNo_(getCurrentPeriodNumber_());
 
     sheet.getRange(row, CASE_COLS.CASE_NO).setValue(caseNo);
     sheet.getRange(row, CASE_COLS.STATUS).setValue(STATUS.CASE_REGISTERED);
     sheet.getRange(row, CASE_COLS.BILLING_STATUS).setValue(BILLING_STATUS.NOT_BILLED);
+    // ロックを手放す前に書き込みを確定させる。これを行わないと、書き込みが
+    // バッファに残ったままロックが解放され、次に採番へ入ってきた実行が
+    // 「まだ未採番」と誤認して同じ行・同じ番号を二重に採番しうる。
+    SpreadsheetApp.flush();
 
     syncCaseToDb_(caseNo);
 
     appendOperationLog_(caseNo, '案件登録（自動採番）', '', false);
   });
+}
+
+/**
+ * この期の未使用の案件番号を発行する。
+ *
+ * 通常はカウンター（スクリプトプロパティ）を1つ進めるだけで足りるが、
+ * カウンターと実際のシートの状態がずれると番号が重複しうる
+ * （テストデータのリセットでカウンターだけ戻した、複数の担当者が
+ *  onEditトリガーを登録していて採番が二重に走った、など）。
+ * そのため発行後に既存の番号と突き合わせ、使用済みなら次の番号を取り直す。
+ */
+function generateUniqueCaseNo_(period) {
+  const used = collectUsedCaseNos_();
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const caseNo = `${period}-${pad3_(nextSequence_(seqKey_('CASE', period)))}`;
+    if (!used[caseNo]) return caseNo;
+    console.warn(`案件番号 ${caseNo} は既に使われているため、次の番号を採番します。`);
+  }
+  throw AppError_('CASE_NO_UNAVAILABLE',
+    '案件番号を採番できませんでした。番号が重複している可能性があります。管理者にお問い合わせください。');
+}
+
+/** メイン画面UI・全案件DBの両シートで既に使われている案件番号を集める */
+function collectUsedCaseNos_() {
+  const used = {};
+  [getActiveUiSheet_(), getActiveDbSheet_()].forEach(sheet => {
+    const lastRow = sheet.getLastRow();
+    if (lastRow < CASE_DATA_START_ROW) return;
+    sheet.getRange(CASE_DATA_START_ROW, CASE_COLS.CASE_NO, lastRow - CASE_DATA_START_ROW + 1, 1)
+      .getValues()
+      .forEach(rowValues => {
+        const value = String(rowValues[0] == null ? '' : rowValues[0]).trim();
+        if (value) used[value] = true;
+      });
+  });
+  return used;
 }
 
 /**

@@ -98,9 +98,25 @@
     ));
   }
 
+  /**
+   * ボタン操作を受け付けられる状態か判定する。
+   * 受け付けられない場合は、押しても何も起きない状態にならないよう理由を表示する。
+   */
+  function canRunAction() {
+    if (isBusy) {
+      showToast('前の処理が完了していません。しばらくお待ちください。', true);
+      return false;
+    }
+    if (!currentCaseNo) {
+      showToast('案件が選択されていません。シート上で案件の行をクリックしてから操作してください。', true);
+      return false;
+    }
+    return true;
+  }
+
   /** コメント不要な操作（作成・再作成・印刷・PDF出力）をそのまま実行する */
   function runSimple(action) {
-    if (!currentCaseNo || isBusy) return;
+    if (!canRunAction()) return;
     const fnName = SIMPLE_ACTIONS[action];
     if (!fnName) return;
     setBusy(true);
@@ -112,7 +128,7 @@
 
   /** コメント入力が必要な操作（完成／承認／差し戻し／最終承認）のモーダルを開く */
   function openComment(action, title) {
-    if (!currentCaseNo || isBusy) return;
+    if (!canRunAction()) return;
     pendingCommentAction = action;
     document.getElementById('commentModalTitle').textContent = title;
     document.getElementById('commentText').value = '';

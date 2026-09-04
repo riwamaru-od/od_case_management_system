@@ -48,41 +48,55 @@ function getOrCreateDiffSheet_(ss) {
 
 /**
  * 請求書シートへ「比較用シートと値が違えば黄色」の条件付き書式を設定する。
- * 既存ルールのうち本機能が設定したもの（対象範囲が一致するもの）だけを差し替え、
+ * 既存ルールのうち本機能が設定したものだけを差し替え、
  * 利用者が独自に設定した他の条件付き書式は残す。
+ *
+ * 重要: Googleスプレッドシートの条件付き書式のカスタム数式は、他シートを
+ * 「'シート名'!A1」の形で直接参照できない（ルールは作成できるが、常に不成立となり
+ * 色が付かない）。他シートを参照するには INDIRECT() で文字列から組み立てる必要がある。
+ * そのため各セルの番地を ADDRESS(ROW(), COLUMN()) で組み立て、自セルと比較用シートの
+ * 同一番地を INDIRECT で読んで突き合わせている。
+ * この数式は範囲によらず同一のため、全範囲をまとめて1つのルールとして設定する。
  */
 function applyDiffConditionalFormatRules_(invoiceSheet, diffSheet) {
-  const targetA1s = QUOTE_INVOICE_DIFF_RANGES.slice();
-  const diffSheetRef = `'${diffSheet.getName()}'`;
+  const ranges = QUOTE_INVOICE_DIFF_RANGES.map(a1 => invoiceSheet.getRange(a1));
+  const formula = buildDiffConditionalFormula_(diffSheet.getName());
+
+  const rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(formula)
+    .setBackground(QUOTE_INVOICE_DIFF_COLOR)
+    .setRanges(ranges)
+    .build();
 
   const kept = keepNonDiffConditionalFormatRules_(invoiceSheet);
+  invoiceSheet.setConditionalFormatRules(kept.concat([rule]));
+}
 
-  const added = targetA1s.map(a1 => {
-    const range = invoiceSheet.getRange(a1);
-    // 範囲の左上セルを基準にした相対参照にすると、範囲内の各セルが
-    // 比較用シートの同じ番地と1対1で比較される
-    const topLeft = range.getCell(1, 1).getA1Notation();
-    return SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied(`=${topLeft}<>${diffSheetRef}!${topLeft}`)
-      .setBackground(QUOTE_INVOICE_DIFF_COLOR)
-      .setRanges([range])
-      .build();
-  });
-
-  invoiceSheet.setConditionalFormatRules(kept.concat(added));
+/** 差分ハイライトのカスタム数式を組み立てる */
+function buildDiffConditionalFormula_(diffSheetName) {
+  const address = 'ADDRESS(ROW(),COLUMN())';
+  return `=INDIRECT(${address})<>INDIRECT("'${diffSheetName}'!"&${address})`;
 }
 
 /**
- * シートの条件付き書式のうち、本機能が設定した差分ハイライト（対象範囲が
- * QUOTE_INVOICE_DIFF_RANGES と一致するもの）を除いたルールを返す。
+ * シートの条件付き書式のうち、本機能が設定した差分ハイライトを除いたルールを返す。
  * 利用者がテンプレート側で独自に設定した条件付き書式は残す。
  */
 function keepNonDiffConditionalFormatRules_(sheet) {
-  const targetA1s = QUOTE_INVOICE_DIFF_RANGES;
-  return sheet.getConditionalFormatRules().filter(rule => {
-    const ruleA1s = rule.getRanges().map(r => r.getA1Notation());
-    return !ruleA1s.every(a1 => targetA1s.indexOf(a1) !== -1);
-  });
+  return sheet.getConditionalFormatRules().filter(rule => !isQuoteInvoiceDiffRule_(rule));
+}
+
+/**
+ * 条件付き書式のルールが、本機能が設定した差分ハイライトかどうかを判定する。
+ * 数式の中で比較用シートを参照しているかどうかで見分ける
+ * （対象範囲での判定だと、利用者が同じ範囲に設定した独自ルールまで消してしまうため）。
+ */
+function isQuoteInvoiceDiffRule_(rule) {
+  const condition = rule.getBooleanCondition();
+  if (!condition) return false;
+  if (condition.getCriteriaType() !== SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) return false;
+  const values = condition.getCriteriaValues();
+  return values.length > 0 && String(values[0]).indexOf(QUOTE_INVOICE_DIFF_SHEET_NAME) !== -1;
 }
 
 /**
