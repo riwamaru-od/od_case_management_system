@@ -126,6 +126,7 @@ function dailyScheduledTasks() {
  */
 function morningScheduledTasks() {
   runDailyTask_('未承認案件レポートの送信', sendUnapprovedSummaryReportIfNeeded_);
+  runDailyTask_('請求漏れリマインドの送信', sendOverdueBillingRemindersIfNeeded_);
   runDailyTask_('放置書類アラートの送信', sendStalledDocumentAlertsIfNeeded_);
 }
 
