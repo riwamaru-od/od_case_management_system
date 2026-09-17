@@ -35,6 +35,7 @@ function onOpen() {
     .addItem('社印設定を確認する', 'checkSealImageSetting')
     .addItem('案件シートの構成を確認・修復する', 'checkAndRepairCaseSheets')
     .addItem('WebアプリのURLを設定する', 'setWebAppUrlFromPrompt')
+    .addItem('取引先名の選択肢を更新する', 'refreshClientOptionsManually')
     .addSeparator()
     .addItem('今すぐバックアップを作成する', 'createDatabaseBackupManually')
     .addItem('過去期のデータをアーカイブする', 'archiveOldPeriodSheetsManually')
@@ -134,6 +135,7 @@ function maintainCaseNoOrder_() {
 function dailyScheduledTasks() {
   runDailyTask_('翌期リソースの準備', ensureNextPeriodResourcesIfNeeded);
   runDailyTask_('終了予定・請求予定の選択肢更新', refreshScheduleOptionsIfNeeded_);
+  runDailyTask_('取引先名の選択肢更新', refreshClientOptionsIfNeeded_);
   runDailyTask_('過去期データのアーカイブ', archiveOldPeriodSheetsIfNeeded_);
   runDailyTask_('データベースのバックアップ', backupDatabasesIfNeeded_);
   runDailyTask_('請求予定レポートの送信', sendBillingSummaryReportIfNeeded_);

@@ -21,6 +21,20 @@ function setCellValue_(sheet, a1, value) {
   sheet.getRange(a1).setValue(value);
 }
 
+/**
+ * 転記する値の先頭へ、テンプレート側の見出し文言（「案件No.」など）を付ける。
+ * 接頭辞が未設定の書類種別では、値をそのまま返す（Constants.gs の *_PREFIX 参照）。
+ */
+function withCellPrefix_(prefix, value) {
+  return prefix ? `${prefix}${value}` : value;
+}
+
+/** withCellPrefix_ で付けた見出し文言を取り除き、元の値（通し番号など）を取り出す */
+function stripCellPrefix_(prefix, value) {
+  const text = String(value == null ? '' : value);
+  return (prefix && text.indexOf(prefix) === 0) ? text.slice(prefix.length) : text;
+}
+
 /** 見積書・請求書・納品書に共通する宛先ヘッダー情報（取引先DB由来）を書き込む */
 function fillCommonHeaderCells_(sheet, cells, client, caseInfo) {
   setCellValue_(sheet, cells.POSTAL_CODE, client.postalCode);
@@ -29,27 +43,31 @@ function fillCommonHeaderCells_(sheet, cells, client, caseInfo) {
   setCellValue_(sheet, cells.COMPANY_NAME, client.companyName);
   setCellValue_(sheet, cells.DEPARTMENT, client.department);
   setCellValue_(sheet, cells.CONTACT_NAME, `${client.contactName}様`);
-  setCellValue_(sheet, cells.CASE_NO, caseInfo.caseNo);
+  setCellValue_(sheet, cells.CASE_NO, withCellPrefix_(cells.CASE_NO_PREFIX, caseInfo.caseNo));
   setCellValue_(sheet, cells.SUBJECT, caseInfo.caseName);
 }
 
-/** 承認担当社員の氏名・メールアドレスを書き込む（G12/G13相当） */
+/** 承認担当社員の氏名・メールアドレスを書き込む（書類種別ごとの STAFF_NAME / STAFF_EMAIL セル） */
 function fillStaffCells_(sheet, cells, staff) {
   setCellValue_(sheet, cells.STAFF_NAME, staff.name);
   setCellValue_(sheet, cells.STAFF_EMAIL, staff.email);
 }
 
-/** この期・この書類種別の通し番号を発行してG6相当に書き込む（再作成時も新規採番） */
+/** この期・この書類種別の通し番号を発行して SERIAL_NO セルへ書き込む（再作成時も新規採番） */
 function fillSerialNumber_(sheet, cells, docTypeKey) {
   const period = getCurrentPeriodNumber_();
   const serial = nextSequence_(seqKey_(`${docTypeKey.toUpperCase()}_SERIAL`, period));
-  setCellValue_(sheet, cells.SERIAL_NO, serial);
+  setCellValue_(sheet, cells.SERIAL_NO, withCellPrefix_(cells.SERIAL_NO_PREFIX, serial));
 }
 
-/** 指定ファイル（見積書/請求書）の現行「最新」シートから、通し番号（SERIAL_NO）の現在値を読み取る */
+/**
+ * 指定ファイル（見積書/請求書）の現行「最新」シートから、通し番号（SERIAL_NO）の現在値を読み取る。
+ * セルには見出し付き（「見積書No.12」など）で入っているため、接頭辞を取り除いた番号だけを返す。
+ */
 function readDocumentSerialNo_(fileId, docType) {
+  const cells = docType.cells();
   const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
-  return sheet.getRange(docType.cells().SERIAL_NO).getValue();
+  return stripCellPrefix_(cells.SERIAL_NO_PREFIX, sheet.getRange(cells.SERIAL_NO).getValue());
 }
 
 /** 見積書ファイルへヘッダー一式を書き込む */
@@ -69,6 +87,7 @@ function fillQuoteDocument_(file, caseInfo) {
   setCellValue_(sheet, cells.INVOICE_FORMAT_SPEC, client.invoiceFormatSpec);
   setCellValue_(sheet, cells.CLIENT_CONTACT_EMAIL, client.contactEmail);
   setCellValue_(sheet, cells.CLIENT_CONTACT_PHONE, client.contactPhone);
+  setCellValue_(sheet, cells.CLIENT_NOTES, client.notes);
 }
 
 /** 請求書ファイルへヘッダー一式を書き込み、見積書から本文範囲を転記する */
@@ -82,8 +101,10 @@ function fillInvoiceDocument_(file, caseInfo, quoteFileId) {
   fillStaffCells_(sheet, cells, staff);
   fillSerialNumber_(sheet, cells, 'invoice');
 
+  // 参照の見出しは、見積書自身の通し番号に付ける見出しと同じものを使う（表記を1箇所で管理する）
   const quoteSerialNo = readDocumentSerialNo_(quoteFileId, DOC_TYPES.quote);
-  setCellValue_(sheet, cells.QUOTE_SERIAL_REF, `見積書No.${quoteSerialNo}`);
+  setCellValue_(sheet, cells.QUOTE_SERIAL_REF,
+    withCellPrefix_(QUOTE_TEMPLATE_CELLS.SERIAL_NO_PREFIX, quoteSerialNo));
 
   copyRanges_(quoteFileId, DOC_TYPES.quote, sheet, QUOTE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_INVOICE);
 
@@ -111,8 +132,10 @@ function fillDeliveryDocument_(file, caseInfo, invoiceFileId) {
   const quoteFileId = extractFileIdFromUrl_(caseInfo.quoteLink);
   const quoteSerialNo = readDocumentSerialNo_(quoteFileId, DOC_TYPES.quote);
   const invoiceSerialNo = readDocumentSerialNo_(invoiceFileId, DOC_TYPES.invoice);
-  setCellValue_(sheet, cells.QUOTE_SERIAL_REF, `見積書No.${quoteSerialNo}`);
-  setCellValue_(sheet, cells.INVOICE_SERIAL_REF, `請求書No.${invoiceSerialNo}`);
+  setCellValue_(sheet, cells.QUOTE_SERIAL_REF,
+    withCellPrefix_(QUOTE_TEMPLATE_CELLS.SERIAL_NO_PREFIX, quoteSerialNo));
+  setCellValue_(sheet, cells.INVOICE_SERIAL_REF,
+    withCellPrefix_(INVOICE_TEMPLATE_CELLS.SERIAL_NO_PREFIX, invoiceSerialNo));
 
   copyRanges_(invoiceFileId, DOC_TYPES.invoice, sheet, INVOICE_TEMPLATE_CELLS.BODY_COPY_RANGE_FOR_DELIVERY);
 }
@@ -156,7 +179,7 @@ function copyRangeAcrossSpreadsheets_(sourceRange, targetRange) {
 }
 
 /**
- * 社印画像を指定範囲へ挿入する（G8:G13相当。見積書・請求書は承認時、納品書は作成時に呼ぶ）。
+ * 社印画像を指定範囲へ挿入する（SEAL_IMAGE_RANGE 基準。見積書・請求書は承認時、納品書は作成時に呼ぶ）。
  * サイズは Constants.js の SEAL_IMAGE_WIDTH_PX / SEAL_IMAGE_HEIGHT_PX で明示的に指定する
  * （画像素材そのものの解像度に依存させないため）。社印サイズを変更したい場合はその2つの値を編集する。
  *

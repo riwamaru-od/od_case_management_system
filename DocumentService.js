@@ -128,13 +128,30 @@ function countExistingSheetVersions_(ss, label) {
 
 /**
  * 請求書のように、承認後にフォルダを移動する必要がある書類のためのヘルパー。
- * 「{書類種別}_最新」ファイルと、旧版一式（フォルダごと）を新ステージのフォルダへ移動する。
+ * この案件のフォルダ（書類ファイルと旧版一式が入っている）を、新しいステージのフォルダへ移動する。
+ *
+ * 移動元は findCaseDocFolders_ で実際の置き場所を探して決める。移動元のステージを
+ * 決め打ちで getCaseDocFolder_ すると、既に移動済み（＝再作成後の再承認など2回目以降）の
+ * ときに空のフォルダを新しく作ってしまい、移動先に同名のフォルダが2つできてしまうため。
+ * 既に移動先にある場合は何もしない。
  */
-function moveCaseDocFolderToStage_(docType, caseInfo, fromStage, toStage) {
-  const fromFolder = getCaseDocFolder_(docType, caseInfo, fromStage);
+function moveCaseDocFolderToStage_(docType, caseInfo, toStage) {
   const periodNumber = getCurrentPeriodNumber_();
   const toStageFolder = getDocumentFolder_(docType.folderKind, periodNumber, docType.folderForStage(toStage));
-  moveFileOrFolder_(fromFolder, toStageFolder);
+
+  findCaseDocFolders_(docType, caseInfo, periodNumber).forEach(folder => {
+    if (isChildOfFolder_(folder, toStageFolder)) return; // 既に移動済み
+    moveFileOrFolder_(folder, toStageFolder);
+  });
+}
+
+/** フォルダが指定フォルダの直下にあるかを判定する */
+function isChildOfFolder_(folder, parentFolder) {
+  const parents = folder.getParents();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === parentFolder.getId()) return true;
+  }
+  return false;
 }
 
 /**

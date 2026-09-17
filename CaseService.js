@@ -221,6 +221,10 @@ function getCaseInfo_(caseNo) {
     // 書類の経過日数判定に使う（ReportService.gs）。
     quoteStartedAt: get(CASE_COLS.QUOTE_STARTED_AT),
     invoiceStartedAt: get(CASE_COLS.INVOICE_STARTED_AT),
+    // 納品書の無効化日時（内部用）。空でなければ「見積書・請求書が作り直され、
+    // 今ある納品書は古い内容のまま」の状態を表す。納品書のPDF出力を禁止し、
+    // 納品書の作り直しを促すために使う。
+    deliveryInvalidatedAt: get(CASE_COLS.DELIVERY_INVALIDATED_AT),
     _row: row,
   };
 }

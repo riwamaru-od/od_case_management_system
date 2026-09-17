@@ -55,8 +55,14 @@ const CASE_COLS = {
   // 「作成中のまま放置されている書類」の経過日数はこちらで判定する。
   QUOTE_STARTED_AT: 35,
   INVOICE_STARTED_AT: 36,
+  // 納品書無効化日時（見積書・請求書を再作成した時点の日時が入る）。
+  // 納品書には承認フローが無いため、見積書・請求書の「再承認待ち」に相当する
+  // 「今ある納品書はもう有効ではない」状態をこの1列で表す。
+  // 値が入っている間は納品書のPDF出力を禁止し、納品書の作り直しを促す。
+  // 納品書を作り直すと空になる（DeliveryService.js 参照）。
+  DELIVERY_INVALIDATED_AT: 37,
 };
-const CASE_LAST_COL = 36;
+const CASE_LAST_COL = 37;
 const CASE_HEADER_ROW = 1; // 全案件DBシート用（見出しは1行目のみ）
 const CASE_DATA_START_ROW = 2; // 全案件DBシート用（見出しは1行目のみ、データは2行目から）
 
@@ -84,6 +90,7 @@ const CASE_HEADERS = [
   '見積書差し戻し日時', '請求書差し戻し日時',
   '見積書再承認待ち', '請求書再承認待ち',
   '見積書着手日時', '請求書着手日時',
+  '納品書無効化日時',
 ];
 
 // ------------------------------------------------------------------
@@ -170,6 +177,13 @@ const BILLING_STATUS = {
 
 // ------------------------------------------------------------------
 // テンプレート転記先セル（各テンプレートはGoogleスプレッドシート）
+//
+// 「*_PREFIX」を併記しているセルは、転記する値の先頭にその文言を付ける
+// （例: 案件番号「17-001」→ セルには「案件No.17-001」と書き込む）。
+// テンプレート側に見出しのセルを別に用意しなくてよいようにするための指定で、
+// 付け外しや文言の変更はこのファイルの修正だけで完結する。
+// 通し番号を他の書類から参照する際は、この接頭辞を取り除いた数値だけを使う
+// （TemplateFillService.gs の readDocumentSerialNo_ 参照）。
 // ------------------------------------------------------------------
 const QUOTE_TEMPLATE_CELLS = {
   POSTAL_CODE: 'B5',
@@ -178,8 +192,10 @@ const QUOTE_TEMPLATE_CELLS = {
   COMPANY_NAME: 'B8',
   DEPARTMENT: 'B10',
   CONTACT_NAME: 'B11',      // 末尾に「様」を付けて記載
-  CASE_NO: 'G1',
-  SERIAL_NO: 'G6',          // この期の見積書通し番号（再作成時も新規採番）
+  CASE_NO: 'G54',
+  CASE_NO_PREFIX: '案件No.',
+  SERIAL_NO: 'G53',         // この期の見積書通し番号（再作成時も新規採番）
+  SERIAL_NO_PREFIX: '見積書No.',
   // 承認後に社印画像を挿入する基準セル。横位置はこのセルの左上から
   // SEAL_IMAGE_OFFSET_X_PX 分ずらし、縦位置は SEAL_IMAGE_BOTTOM_ROW の下端に
   // 画像の下端が揃うよう自動計算する
@@ -193,6 +209,7 @@ const QUOTE_TEMPLATE_CELLS = {
   INVOICE_FORMAT_SPEC: 'O11',
   CLIENT_CONTACT_EMAIL: 'O13',
   CLIENT_CONTACT_PHONE: 'O14',
+  CLIENT_NOTES: 'J49',      // 取引先DBの「留意点」（P列）をそのまま転記する社内確認用の欄
   CREATOR_NAME: 'K56',
   CREATED_AT: 'L56',
   REQUEST_COMMENT: 'N56',   // 承認依頼時コメント
@@ -211,11 +228,13 @@ const INVOICE_TEMPLATE_CELLS = {
   COMPANY_NAME: 'B8',
   DEPARTMENT: 'B10',
   CONTACT_NAME: 'B11',
-  CASE_NO: 'G1',
-  SERIAL_NO: 'G6',          // この期の請求書通し番号（再作成時も新規採番）
+  CASE_NO: 'G54',
+  CASE_NO_PREFIX: '案件No.',
+  SERIAL_NO: 'G52',         // この期の請求書通し番号（再作成時も新規採番）
+  SERIAL_NO_PREFIX: '請求書No.',
   SEAL_IMAGE_RANGE: 'G4', // 社印を挿入する基準セル（見積書と同じ扱い）
-  STAFF_NAME: 'G12',
-  STAFF_EMAIL: 'G13',
+  STAFF_NAME: 'G11',
+  STAFF_EMAIL: 'G12',
   SUBJECT: 'C16',
   QUOTE_SERIAL_REF: 'G53',  // 請求書作成時点の最新の見積書通し番号を「見積書No.xxx」の形式で自動記載
   CREATOR_NAME: 'C56',
@@ -236,11 +255,12 @@ const DELIVERY_TEMPLATE_CELLS = {
   COMPANY_NAME: 'B8',
   DEPARTMENT: 'B10',
   CONTACT_NAME: 'B11',
-  CASE_NO: 'G1',
+  CASE_NO: 'G54',
+  CASE_NO_PREFIX: '案件No.',
   SERIAL_NO: 'G6',          // この期の納品書通し番号（再作成時も新規採番）
   SEAL_IMAGE_RANGE: 'G4', // 社印を挿入する基準セル（見積書と同じ扱い）
-  STAFF_NAME: 'G12',
-  STAFF_EMAIL: 'G13',
+  STAFF_NAME: 'G11',
+  STAFF_EMAIL: 'G12',
   SUBJECT: 'C16',
   QUOTE_SERIAL_REF: 'G52',   // 納品書作成時点の最新の見積書通し番号を「見積書No.xxx」の形式で自動記載
   INVOICE_SERIAL_REF: 'G53', // 納品書作成時点の最新の請求書通し番号を「請求書No.xxx」の形式で自動記載
@@ -266,10 +286,12 @@ const DELIVERY_TEMPLATE_CELLS = {
 const QUOTE_ALWAYS_EDITABLE_RANGES = ['J22:O47', 'N53'];
 
 const DOC_EDITABLE_RANGES = {
-  // G列の下端のみ書類種別で異なる（見積書=54行、請求書=52行、納品書=51行）。
+  // G列の下端のみ書類種別で異なる（見積書=52行、請求書=51行、納品書=51行）。
+  // 下端より下のG列は、案件No.・通し番号・見積書No.参照など自動転記されるセルのため
+  // 編集可能範囲から外す（見積書=G53/G54、請求書=G52〜G54、納品書=G52〜G54）。
   // 見積書は社内の作業用エリア（QUOTE_ALWAYS_EDITABLE_RANGES）も編集可能にする。
-  quote:    ['B22:E47', 'G22:G54', 'B48:C54', 'E49', 'F50', 'F53'].concat(QUOTE_ALWAYS_EDITABLE_RANGES),
-  invoice:  ['B22:E47', 'G22:G52', 'B48:C54', 'E49', 'F50', 'F53'],
+  quote:    ['B22:E47', 'G22:G52', 'B48:C54', 'E49', 'F50', 'F53'].concat(QUOTE_ALWAYS_EDITABLE_RANGES),
+  invoice:  ['B22:E47', 'G22:G51', 'B48:C54', 'E49', 'F50', 'F53'],
   delivery: ['B22:E47', 'G22:G51', 'B48:C54', 'E49', 'F50', 'F53'],
 };
 
@@ -291,16 +313,20 @@ const DOC_LOCK_MESSAGE = 'この範囲の編集はロックされています。
 //   トリガー数上限に抵触するため採用していない）
 // ------------------------------------------------------------------
 const QUOTE_INVOICE_DIFF_SHEET_NAME = '_見積比較用';
+// 各要素は、見積書と請求書で番地が同じなら文字列、番地が異なるなら
+// { quote: 見積書側の範囲, invoice: 請求書側の範囲 } で指定する（行数・列数は揃えること）。
+// 比較用シートには「請求書側の番地」へ見積書の値を書き込み、請求書の同じ番地と突き合わせる。
 const QUOTE_INVOICE_DIFF_RANGES = [
   'B5:B8',   // 郵便番号・住所1・住所2・会社名（取引先DB由来）
   'B10:B11', // 部署・担当者名（取引先DB由来）
-  'G1',      // 案件番号
+  'G54',     // 案件No.
   'C16',     // 件名（案件名）
-  'G12:G13', // 担当社員の氏名・メールアドレス（社員DB由来）
+  // 担当社員の氏名・メールアドレス（社員DB由来）。見積書はG12/G13、請求書はG11/G12。
+  { quote: 'G12:G13', invoice: 'G11:G12' },
   'B22:E47', // 明細（見積書から転記）
   'E49', 'F50', 'F53',
 ];
-// 差分があるセルの背景色。請求書独自の項目（G6=請求書通し番号、G53=見積書No.参照）は
+// 差分があるセルの背景色。請求書独自の項目（G52=請求書通し番号、G53=見積書No.参照）は
 // 見積書と一致しなくて当然のため、上記 QUOTE_INVOICE_DIFF_RANGES には含めていない。
 const QUOTE_INVOICE_DIFF_COLOR = '#FFF2A8';
 
@@ -365,6 +391,20 @@ const SCHEDULE_OPTIONS_FIXED_CHOICES = ['未定', '営業案件']; // 月に紐�
 // 請求予定（E列）が今月分（前半・後半）に一致する行の文字色。今月中に請求すべき案件が
 // 一目でわかるよう、条件付き書式で自動的に色付けする（ScheduleOptionsService.gs参照）。
 const CURRENT_MONTH_BILLING_TEXT_COLOR = '#1155CC';
+
+// ------------------------------------------------------------------
+// 取引先名（B列）のプルダウン選択肢（ClientOptionsService.gs 参照）。
+//
+// 取引先DBには同じ社名で担当者だけが異なる行が複数登録されるため、社名だけでは
+// どの行を指しているのか決められない。そこで案件シートのB列は
+// 「社名（担当者名）」の形式で選ばせ、その表示名から取引先DBの行を一意に引く。
+// 選択肢は終了予定・請求予定と同じ「config」シートへ自動生成する（列は下記）。
+// ------------------------------------------------------------------
+const CLIENT_OPTIONS_CONFIG_COL = 2; // configシートで取引先名の選択肢を書き出す列（B列）
+const CLIENT_OPTIONS_CLEAR_ROWS = 500; // 取引先の増減に備えて広めにクリアする行数
+// 表示名の組み立て方（社名と担当者名の間に入れる文字）。担当者名が空欄の取引先は社名のみ。
+const CLIENT_OPTION_LABEL_OPEN = '（';
+const CLIENT_OPTION_LABEL_CLOSE = '）';
 
 // ------------------------------------------------------------------
 // 期の起点定義（確定仕様2章: 5/1切り替え。2026/7時点で17期）

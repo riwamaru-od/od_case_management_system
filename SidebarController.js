@@ -130,6 +130,17 @@ function computeButtonStates_(caseInfo, email) {
   const isQuoteDrafted = isQuoteDraftedStatus_(s);
   const isInvoiceDrafted = isInvoiceDraftedStatus_(s);
 
+  // 再作成できる条件: 差し戻された後か、一度でも承認された後。
+  // 「一度でも承認された後」を承認日時（履歴として残る列）で見ているため、請求書の作成・
+  // 承認・請求済みまで進んだ後でも見積書を作り直せる（＝請求後の再見積もり）。
+  // その場合、古い請求書・納品書は invalidateDownstreamDocuments_ でロックされる。
+  const canRecreateQuoteDoc = !!caseInfo.quoteRejectedAt || !!caseInfo.quoteApprovedAt || s === STATUS.QUOTE_APPROVED;
+  // 請求書の作り直しは、見積書が再作成・差し戻し中の間は行わせない（古い内容を写すため）
+  const canRecreateInvoiceDoc = (!!caseInfo.invoiceRejectedAt || !!caseInfo.invoiceApprovedAt || s === STATUS.INVOICE_APPROVED)
+    && !caseInfo.quoteReapprovalPending;
+  // 納品書が「無効化」された状態（見積書・請求書が作り直された）かどうか
+  const isDeliveryInvalidated = !!caseInfo.deliveryInvalidatedAt;
+
   const b = (enabled, reason) => ({ enabled: !!enabled, reason: enabled ? '' : (reason || '') });
 
   // 最終承認済み・中止済みの案件は表示用シートから削除済みで、全案件DBの履歴閲覧用に
@@ -161,8 +172,8 @@ function computeButtonStates_(caseInfo, email) {
     rejectQuote: b(isQuoteDrafted && canApproveQuote, !isQuoteDrafted ? '承認待ちの状態ではありません' : '見積書承認の権限がありません'),
     // 再作成は「差し戻し後」または「承認後」のみ活性化する（承認待ち＝作成直後の作成中と区別するため
     // quoteRejectedAt フラグを利用する。Constants.js/CASE_COLS.QUOTE_REJECTED_AT 参照）
-    recreateQuote: b((!!caseInfo.quoteRejectedAt || s === STATUS.QUOTE_APPROVED) && canApproveQuote,
-      (!caseInfo.quoteRejectedAt && s !== STATUS.QUOTE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '見積書承認の権限がありません'),
+    recreateQuote: b(canRecreateQuoteDoc && canApproveQuote,
+      !canRecreateQuoteDoc ? '差し戻し後または承認後のみ操作できます' : '見積書承認の権限がありません'),
 
     // 差し戻し・再作成された後は、再承認されるまでPDF出力させない（古い版のPDFが
     // 出力されるのを防ぐ）。quoteApprovedAt は履歴として残るため、
@@ -179,16 +190,22 @@ function computeButtonStates_(caseInfo, email) {
       caseInfo.invoiceRejectedAt ? '差し戻し後は再作成してから操作してください' : '請求書作成中の案件のみ操作できます'),
     approveInvoice: b(isInvoiceDrafted && canApproveInvoice, !isInvoiceDrafted ? '承認待ちの状態ではありません' : '請求書承認の権限がありません'),
     rejectInvoice: b(isInvoiceDrafted && canApproveInvoice, !isInvoiceDrafted ? '承認待ちの状態ではありません' : '請求書承認の権限がありません'),
-    recreateInvoice: b((!!caseInfo.invoiceRejectedAt || s === STATUS.INVOICE_APPROVED) && canApproveInvoice,
-      (!caseInfo.invoiceRejectedAt && s !== STATUS.INVOICE_APPROVED) ? '差し戻し後または承認後のみ操作できます' : '請求書承認の権限がありません'),
+    recreateInvoice: b(canRecreateInvoiceDoc && canApproveInvoice,
+      caseInfo.quoteReapprovalPending ? '見積書が再作成・差し戻し中です。再度承認されてから操作してください'
+        : (!canRecreateInvoiceDoc ? '差し戻し後または承認後のみ操作できます' : '請求書承認の権限がありません')),
 
     exportInvoicePdf: b(!!caseInfo.invoiceApprovedAt && !caseInfo.invoiceReapprovalPending,
       caseInfo.invoiceReapprovalPending ? '再作成・差し戻し後は、再度承認されるまで出力できません' : '請求書承認済み以降のみ操作できます'),
-    createDelivery: b(!!caseInfo.invoiceApprovedAt && !caseInfo.invoiceReapprovalPending && !caseInfo.deliveryLink,
+    // 納品書が無効化されている場合は、同じボタンで作り直せるよう再び活性にする
+    createDelivery: b(!!caseInfo.invoiceApprovedAt && !caseInfo.invoiceReapprovalPending
+      && (!caseInfo.deliveryLink || isDeliveryInvalidated),
       caseInfo.invoiceReapprovalPending ? '請求書が再作成・差し戻し中です。再度承認されてから操作してください'
         : (!caseInfo.invoiceApprovedAt ? '請求書承認済み以降のみ操作できます' : '既に納品書が作成されています')),
 
-    exportDeliveryPdf: b(!!caseInfo.deliveryLink, '納品書がまだ作成されていません'),
+    // 見積書・請求書が作り直された後は、納品書を作り直すまで出力させない
+    exportDeliveryPdf: b(!!caseInfo.deliveryLink && !isDeliveryInvalidated,
+      isDeliveryInvalidated ? '見積書・請求書が作り直されました。納品書を作成し直してから出力してください'
+        : '納品書がまだ作成されていません'),
 
     // 案件中止: 社員なら誰でも、案件が進行中であればいつでも中止できる（承認ロール等の制限なし）
     cancelCase: b(true, ''),

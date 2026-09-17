@@ -39,9 +39,10 @@ function buildScheduleOptionList_() {
 }
 
 /**
- * configシートへ選択肢一覧を書き込む。
+ * configシートのA列へ選択肢一覧を書き込む。
  * 既存の内容は範囲を広めにクリアしてから書き込み、月範囲がずれても古い行が
- * 残らないようにする。
+ * 残らないようにする（クリアするのはA列のみ。B列は取引先名の選択肢が使う -
+ * ClientOptionsService.gs 参照）。
  * @return {GoogleAppsScript.Spreadsheet.Range} 書き込んだ選択肢のセル範囲（A2以降）
  */
 function writeScheduleOptionsToConfigSheet_(sheet, options) {

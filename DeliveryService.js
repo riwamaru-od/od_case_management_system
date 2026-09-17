@@ -4,6 +4,11 @@
  * 請求書をベースに作成し、作成者/作成日時・社印のみ記録する。PDF出力は
  * ApprovalService.gs の共通関数（exportDocumentPdfForCase_）を
  * docTypeKey='delivery' で呼び出せば良いように設計している。
+ *
+ * 見積書・請求書が作り直されると、今ある納品書は内容が古くなるため
+ * 「無効化」される（invalidateDownstreamDocuments_）。納品書には承認フローが無く
+ * 「再作成」ボタンも持たないため、無効化された場合は同じ「納品書作成」の操作で
+ * 作り直す（見積書・請求書の再作成と同じく、同一ファイル内に新しいシートを積む）。
  */
 
 function createDeliveryForCase_(caseNo) {
@@ -14,9 +19,10 @@ function createDeliveryForCase_(caseNo) {
     const staff = findStaffByEmail_(email);
     const now = new Date();
 
-    // 二重作成の防止: 既に納品書がある場合は作り直さず、既存のURLを返す
-    // （createDocumentForCase_ と同じ考え方。ApprovalService.gs のコメント参照）
-    if (caseInfo.deliveryLink) {
+    // 既に納品書がある場合、無効化されていれば作り直し、そうでなければ何もしない
+    // （二重作成の防止。createDocumentForCase_ と同じ考え方 - ApprovalService.gs のコメント参照）
+    const isRecreate = !!caseInfo.deliveryLink && !!caseInfo.deliveryInvalidatedAt;
+    if (caseInfo.deliveryLink && !isRecreate) {
       appendOperationLog_(caseNo, '納品書作成', '既に作成済みのため作成をスキップしました（二重実行の防止）', false);
       return { url: caseInfo.deliveryLink };
     }
@@ -27,7 +33,12 @@ function createDeliveryForCase_(caseNo) {
     }
 
     const invoiceFileId = extractFileIdFromUrl_(caseInfo.invoiceLink);
-    const file = createLatestDocument_(docType, caseInfo, 'created');
+
+    // 作り直しの場合は、古い納品書のPDFを削除してから旧版シートを退避する
+    const trashedPdfCount = isRecreate ? trashCaseDocPdfs_(docType, caseInfo) : 0;
+    const file = isRecreate
+      ? recreateLatestDocument_(docType, caseInfo)
+      : createLatestDocument_(docType, caseInfo, 'created');
     fillDeliveryDocument_(file, caseInfo, invoiceFileId);
 
     const sheet = getPrimarySheet_(file, docType);
@@ -44,13 +55,20 @@ function createDeliveryForCase_(caseNo) {
       appendOperationLog_(caseNo, '納品書作成（社印）', `社印画像の挿入に失敗: ${e && e.message ? e.message : e}`, true);
     }
 
-    setCaseFields_(caseNo, {
+    const fieldUpdates = {
       [docType.col.link]: file.getUrl(),
       [docType.col.creator]: staff ? staff.name : email,
       [docType.col.createdAt]: formatDateTime_(now),
-    });
+      // 新しい版ができたので無効化を解除する（作り直しでなければ元から空欄）
+      [docType.col.invalidatedAt]: '',
+    };
+    // 削除した古いPDFへのリンクが残らないようにする（出力者・出力日時は履歴として残す）
+    if (isRecreate) fieldUpdates[docType.col.outputLink] = '';
+    setCaseFields_(caseNo, fieldUpdates);
 
-    appendOperationLog_(caseNo, '納品書作成', `URL: ${file.getUrl()}`, false);
+    const logDetail = [`URL: ${file.getUrl()}`, trashedPdfCount ? `古いPDF${trashedPdfCount}件を削除` : '']
+      .filter(Boolean).join(' / ');
+    appendOperationLog_(caseNo, isRecreate ? '納品書再作成' : '納品書作成', logDetail, false);
 
     return { url: file.getUrl() };
   }, caseNo);

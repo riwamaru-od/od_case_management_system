@@ -4,7 +4,8 @@
  *
  * 仕組み:
  *   1. 請求書ファイル内に非表示の比較用シート（QUOTE_INVOICE_DIFF_SHEET_NAME）を作り、
- *      請求書の作成・再作成時点における見積書の値を「同一番地」へ書き込んでおく。
+ *      請求書の作成・再作成時点における見積書の値を「請求書側と同じ番地」へ書き込んでおく
+ *      （担当社員名などテンプレート上の番地が見積書と異なる項目は、請求書側の番地に合わせる）。
  *   2. 請求書本体（最新シート）に条件付き書式を設定し、比較用シートと値が異なるセルを
  *      黄色にする。条件付き書式はスプレッドシートの機能なので、利用者が請求書を編集した
  *      瞬間に色が付き、見積書と同じ内容に直せば即座に色が消える。
@@ -23,12 +24,25 @@ function applyQuoteInvoiceDiffHighlight_(invoiceSheet, quoteFileId) {
   const quoteSheet = getPrimarySheet_(DriveApp.getFileById(quoteFileId), DOC_TYPES.quote);
   const diffSheet = getOrCreateDiffSheet_(invoiceSheet.getParent());
 
-  // 見積書の現在値を、比較用シートの同一番地へ複製する
-  QUOTE_INVOICE_DIFF_RANGES.forEach(a1 => {
-    diffSheet.getRange(a1).setValues(quoteSheet.getRange(a1).getValues());
+  // 見積書の現在値を、比較用シートの「請求書側の番地」へ複製する。
+  // 担当社員の氏名・メールのように見積書と請求書で番地が異なる項目があるため、
+  // 比較用シートは常に請求書の番地に合わせて作る（条件付き書式は自セルと
+  // 比較用シートの同一番地を突き合わせるため）。
+  QUOTE_INVOICE_DIFF_RANGES.forEach(entry => {
+    const pair = normalizeDiffRangeEntry_(entry);
+    diffSheet.getRange(pair.invoice).setValues(quoteSheet.getRange(pair.quote).getValues());
   });
 
   applyDiffConditionalFormatRules_(invoiceSheet, diffSheet);
+}
+
+/**
+ * QUOTE_INVOICE_DIFF_RANGES の1要素を { quote, invoice } の形へ揃える。
+ * 文字列で書かれている要素は、見積書・請求書とも同じ番地を指す。
+ */
+function normalizeDiffRangeEntry_(entry) {
+  if (typeof entry === 'string') return { quote: entry, invoice: entry };
+  return { quote: entry.quote, invoice: entry.invoice };
 }
 
 /**
@@ -59,7 +73,7 @@ function getOrCreateDiffSheet_(ss) {
  * この数式は範囲によらず同一のため、全範囲をまとめて1つのルールとして設定する。
  */
 function applyDiffConditionalFormatRules_(invoiceSheet, diffSheet) {
-  const ranges = QUOTE_INVOICE_DIFF_RANGES.map(a1 => invoiceSheet.getRange(a1));
+  const ranges = QUOTE_INVOICE_DIFF_RANGES.map(entry => invoiceSheet.getRange(normalizeDiffRangeEntry_(entry).invoice));
   const formula = buildDiffConditionalFormula_(diffSheet.getName());
 
   const rule = SpreadsheetApp.newConditionalFormatRule()

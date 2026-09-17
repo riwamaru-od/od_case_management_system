@@ -157,7 +157,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
 
     if (docTypeKey === 'invoice') {
       // 請求書は承認済み以降、フォルダを「未請求案件」→「請求中案件」へ移動
-      moveCaseDocFolderToStage_(docType, caseInfo, 'created', 'billed');
+      moveCaseDocFolderToStage_(docType, caseInfo, 'billed');
     }
 
     // このファイルへの書き込みが全て完了した後で、ファイル編集権限を降格する
@@ -232,6 +232,12 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
 
     const caseInfo = getCaseInfo_(caseNo);
 
+    // 見積書が再作成・差し戻し中の間は、請求書を作り直させない
+    // （古い見積書の内容を写した請求書ができてしまうため。作成時と同じ考え方）
+    if (docTypeKey === 'invoice' && caseInfo.quoteReapprovalPending) {
+      throw AppError_('INVALID_STATE', '見積書が再作成・差し戻し中です。見積書が再度承認されてから請求書を再作成してください。');
+    }
+
     // 二重実行の防止: 同じ再作成リクエストが二重で届くと、1ファイル内に同じ版の
     // シートが2枚積み上がってしまう。着手日時（分単位）が今と同じであれば、
     // 直前の実行と同一の要求とみなして何もしない。
@@ -267,12 +273,112 @@ function recreateDocumentForCase_(docTypeKey, caseNo) {
     if (docType.col.outputLink) fieldUpdates[docType.col.outputLink] = '';
     setCaseFields_(caseNo, fieldUpdates);
 
-    const recreateLogDetail = [`URL: ${file.getUrl()}`, trashedPdfCount ? `古いPDF${trashedPdfCount}件を削除` : '']
-      .filter(Boolean).join(' / ');
+    // この書類を元に作られた下流の書類（請求書・納品書）は内容が古くなるため、
+    // ロックして出力できない状態にする（請求済みの後に見積書を作り直す場合など）
+    const invalidatedLabels = invalidateDownstreamDocuments_(caseNo, caseInfo, docTypeKey);
+
+    const recreateLogDetail = [
+      `URL: ${file.getUrl()}`,
+      trashedPdfCount ? `古いPDF${trashedPdfCount}件を削除` : '',
+      invalidatedLabels.length ? `${invalidatedLabels.join('・')}をロック（要再作成）` : '',
+    ].filter(Boolean).join(' / ');
     appendOperationLog_(caseNo, `${docType.label}再作成`, recreateLogDetail, false);
 
     return { url: file.getUrl(), status: docType.status.inProgress };
   }, caseNo);
+}
+
+/**
+ * 書類種別ごとの「下流の書類」（その書類を元に作られる書類）。
+ * 見積書 → 請求書 → 納品書 の順に内容を引き継ぐため、上流を作り直すと下流は古くなる。
+ */
+const DOWNSTREAM_DOC_KEYS_ = {
+  quote: ['invoice', 'delivery'],
+  invoice: ['delivery'],
+  delivery: [],
+};
+
+/**
+ * 上流の書類を作り直したときに、それを元に作られた下流の書類を「無効」の状態にする。
+ *
+ * 請求書を出した後に再見積もりを行う運用（見積書の再作成）を想定した処理。
+ * 古い請求書・納品書がそのまま出力・送付されてしまわないよう、
+ *   1. 案件シートのフラグを立てて、PDF出力ボタンとサーバー側の出力処理を止める
+ *   2. 出力済みのPDFを削除し、リンクも消す
+ *   3. 書類シートを保護して編集できないようにし、無効な書類と分かるよう社印を外す
+ * を行う。無効化された書類は「再作成」（納品書は「納品書作成」）で作り直すと、
+ * フラグが消えて通常の承認・出力の流れに戻る。
+ *
+ * @return {string[]} 無効化した書類のラベル（操作ログ用）
+ */
+function invalidateDownstreamDocuments_(caseNo, caseInfo, docTypeKey) {
+  const now = formatDateTime_(new Date());
+  const invalidatedLabels = [];
+
+  (DOWNSTREAM_DOC_KEYS_[docTypeKey] || []).forEach(key => {
+    const docType = DOC_TYPES[key];
+    if (!caseInfo[`${key}Link`]) return; // まだ作られていない書類は対象外
+
+    // 1. フラグを立てる（ボタンの活性判定・出力の可否はこの値で決まる）
+    const fieldUpdates = {};
+    if (docType.col.outputLink) fieldUpdates[docType.col.outputLink] = '';
+    // 差し戻しと同じく「再作成するまで完成（承認依頼）できない」状態にする
+    if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = now;
+    if (docType.col.reapprovalPending) fieldUpdates[docType.col.reapprovalPending] = now;
+    if (docType.col.invalidatedAt) fieldUpdates[docType.col.invalidatedAt] = now;
+    setCaseFields_(caseNo, fieldUpdates);
+
+    // 2. 出力済みのPDFを削除する
+    try {
+      trashCaseDocPdfs_(docType, caseInfo);
+    } catch (e) {
+      console.warn(`${docType.label}の古いPDFの削除に失敗しました: ${e}`);
+    }
+
+    // 3. 書類シートをロックする
+    try {
+      lockDocumentAsInvalidated_(docType, caseInfo);
+    } catch (e) {
+      // ロックに失敗しても、上記フラグによりシステム経由の出力は止まる。
+      // 気付けるよう操作ログにエラーとして残す。
+      console.warn(`${docType.label}のロックに失敗しました: ${e}`);
+      appendOperationLog_(caseNo, `${docType.label}の無効化（ロック）`,
+        `ロックに失敗: ${e && e.message ? e.message : e}`, true);
+    }
+
+    invalidatedLabels.push(docType.label);
+  });
+
+  // 請求のやり直しが必要になるため、請求ステータスを未請求へ戻す
+  // （新しい請求書・納品書を出力し直した時点で、改めて「請求済み」になる）
+  if (invalidatedLabels.length && caseInfo.billingStatus === BILLING_STATUS.BILLED) {
+    setCaseFields_(caseNo, { [CASE_COLS.BILLING_STATUS]: BILLING_STATUS.NOT_BILLED });
+  }
+
+  return invalidatedLabels;
+}
+
+/**
+ * 無効になった書類の「最新」シートを、誰も編集できない状態にする。
+ * 再作成で退避される旧版シートと同じ扱いで、社印も外す
+ * （押印済みのまま残すと、有効な書類と見分けがつかなくなるため）。
+ */
+function lockDocumentAsInvalidated_(docType, caseInfo) {
+  const fileId = extractFileIdFromUrl_(caseInfo[`${docType.key}Link`]);
+  const file = DriveApp.getFileById(fileId);
+  const sheet = getPrimarySheet_(file, docType);
+
+  try {
+    removeSealImages_(sheet, sheet.getRange(docType.cells().SEAL_IMAGE_RANGE));
+  } catch (e) {
+    console.warn(`${docType.label}からの社印除去に失敗しました: ${e}`);
+  }
+  protectSheet_(sheet, null, `${docType.label}は作り直しが必要なため編集不可`);
+  try {
+    restrictFileEditAccessToAdminOnly_(file);
+  } catch (e) {
+    console.warn(`ファイル編集権限の降格に失敗しました: ${e}`);
+  }
 }
 
 /**
@@ -287,6 +393,8 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
   return withLock_(`${DOC_TYPES[docTypeKey].label}のPDF出力`, () => {
     const docType = DOC_TYPES[docTypeKey];
     const caseInfo = getCaseInfo_(caseNo);
+    assertDocumentIsOutputtable_(docType, caseInfo);
+
     const email = getActiveUserEmail_();
     const staff = findStaffByEmail_(email);
     const now = new Date();
@@ -326,6 +434,28 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
 
     return { pdfUrl: pdfFile.getUrl() };
   }, caseNo);
+}
+
+/**
+ * 今の版をPDF出力してよい状態かを検証する。
+ * サイドバー側でもボタンを非活性にしているが、権限・整合性の判定はサーバー側でも行う
+ * （古い版・無効になった版のPDFが取引先へ渡ることを確実に防ぐ）。
+ */
+function assertDocumentIsOutputtable_(docType, caseInfo) {
+  const key = docType.key;
+
+  if (docType.hasApprovalStep && !caseInfo[`${key}ApprovedAt`]) {
+    throw AppError_('INVALID_STATE', `${docType.label}が承認されていないため、PDF出力できません。`);
+  }
+  if (docType.col.reapprovalPending && caseInfo[`${key}ReapprovalPending`]) {
+    throw AppError_('INVALID_STATE',
+      `${docType.label}は再作成・差し戻し後、再度承認されるまでPDF出力できません。`);
+  }
+  if (docType.col.invalidatedAt && caseInfo[`${key}InvalidatedAt`]) {
+    throw AppError_('INVALID_STATE',
+      `見積書・請求書が作り直されたため、今ある${docType.label}は出力できません。`
+      + `${docType.label}を作り直してから出力してください。`);
+  }
 }
 
 /**

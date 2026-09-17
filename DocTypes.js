@@ -86,7 +86,10 @@ const DOC_TYPES = {
       creator: CASE_COLS.DELIVERY_CREATOR,
       createdAt: CASE_COLS.DELIVERY_CREATED_AT,
       // 納品書に承認フローは無い（納品書出力者/日時はテンプレート内セルにのみ記録し、
-      // 全案件DBの集計列は確定仕様どおり作成者/作成日時のみ持つ）
+      // 全案件DBの集計列は確定仕様どおり作成者/作成日時のみ持つ）。
+      // そのかわり、上流（見積書・請求書）が作り直されて内容が古くなったことを
+      // 表す「無効化日時」を持つ（見積書・請求書の reapprovalPending に相当する）。
+      invalidatedAt: CASE_COLS.DELIVERY_INVALIDATED_AT,
     },
     status: {}, // 納品書自体には専用ステータスが無い（案件全体のステータスは変更しない）
     hasApprovalStep: false,
