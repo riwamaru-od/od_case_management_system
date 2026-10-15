@@ -79,46 +79,33 @@ function buildBillingSummaryMessage_(targetMonthDate, cases) {
   const monthLabel = Utilities.formatDate(targetMonthDate, 'Asia/Tokyo', 'yyyy年M月');
   const subject = `【請求予定レポート】${monthLabel}分`;
 
-  if (cases.length === 0) {
-    const body = `${monthLabel}分の請求予定案件はありません。`;
-    const htmlBody = buildEmailHtml_(`${monthLabel}分の請求予定レポート`, [{ label: '対象案件', value: 'ありません' }], null, null);
-    return { subject, body, htmlBody };
-  }
+  const lines = cases.length
+    ? [
+      `${monthLabel}分の請求予定案件一覧（${cases.length}件）`, '',
+      ...cases.map(c => `・${c.caseNo}｜${c.clientName}｜${c.caseName}｜請求予定:${c.billingSchedule}｜ステータス:${c.status}｜請求ステータス:${c.billingStatus}`),
+    ]
+    : [`${monthLabel}分の請求予定案件はありません。`];
 
-  const lines = [`${monthLabel}分の請求予定案件一覧（${cases.length}件）`, ''];
-  cases.forEach(c => {
-    lines.push(`・${c.caseNo}｜${c.clientName}｜${c.caseName}｜請求予定:${c.billingSchedule}｜ステータス:${c.status}｜請求ステータス:${c.billingStatus}`);
+  const notBilled = cases.filter(c => c.billingStatus === BILLING_STATUS.NOT_BILLED).length;
+  const htmlBody = buildEmailHtml_({
+    tone: 'info',
+    eyebrow: '請求予定レポート',
+    headline: `${monthLabel}分の請求予定`,
+    lead: `請求予定が${monthLabel}の前半・後半になっている案件の一覧です。`,
+    stats: [
+      { label: '対象の案件', value: cases.length },
+      { label: 'うち未請求', value: notBilled, color: notBilled ? EMAIL_TONES.danger.color : null },
+    ],
+    contentHtml: buildCaseTableHtml_('対象の案件', cases, [
+      { label: '案件番号', value: c => c.caseNo, nowrap: true },
+      { label: '取引先', value: c => c.clientName },
+      { label: '案件名', value: c => c.caseName },
+      { label: '請求予定', value: c => c.billingSchedule, nowrap: true },
+      { label: 'ステータス', value: c => c.status, badge: true },
+      { label: '請求', value: c => c.billingStatus, badge: true },
+    ]),
   });
-  const body = lines.join('\n');
-
-  const headerCellStyle = 'padding:6px 10px;text-align:left;font-size:11px;color:#666666;border-bottom:2px solid #dddddd;white-space:nowrap;';
-  const cellStyle = 'padding:6px 10px;border-bottom:1px solid #e5e5e5;font-size:12px;color:#222222;';
-  const rowsHtml = cases.map(c => `
-    <tr>
-      <td style="${cellStyle}white-space:nowrap;">${escapeHtmlForMail_(c.caseNo)}</td>
-      <td style="${cellStyle}">${escapeHtmlForMail_(c.clientName)}</td>
-      <td style="${cellStyle}">${escapeHtmlForMail_(c.caseName)}</td>
-      <td style="${cellStyle}white-space:nowrap;">${escapeHtmlForMail_(c.status)}</td>
-      <td style="${cellStyle}white-space:nowrap;">${escapeHtmlForMail_(c.billingStatus)}</td>
-    </tr>`).join('');
-  const htmlBody = `
-  <div style="font-family:'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;max-width:640px;margin:0 auto;padding:24px;background-color:#f7f7f7;">
-    <div style="background-color:#ffffff;border-radius:8px;padding:24px;border:1px solid #e5e5e5;">
-      <h2 style="margin:0 0 16px 0;font-size:16px;color:#222222;">${escapeHtmlForMail_(monthLabel)}分の請求予定案件一覧（${cases.length}件）</h2>
-      <table style="width:100%;border-collapse:collapse;">
-        <tr>
-          <th style="${headerCellStyle}">案件番号</th>
-          <th style="${headerCellStyle}">取引先</th>
-          <th style="${headerCellStyle}">案件名</th>
-          <th style="${headerCellStyle}">ステータス</th>
-          <th style="${headerCellStyle}">請求ステータス</th>
-        </tr>
-        ${rowsHtml}
-      </table>
-      <p style="margin-top:24px;font-size:11px;color:#999999;">本メールは案件管理・見積書自動作成システムより自動送信されています。</p>
-    </div>
-  </div>`;
-  return { subject, body, htmlBody };
+  return { subject, body: lines.join('\n'), htmlBody };
 }
 
 // ------------------------------------------------------------------
@@ -176,15 +163,19 @@ function buildUnapprovedSummaryMessage_(unapproved, billedNotFinalApproved) {
       : ['該当なし']),
   ];
 
-  const htmlBody = `
-  <div style="font-family:'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;max-width:640px;margin:0 auto;padding:24px;background-color:#f7f7f7;">
-    <div style="background-color:#ffffff;border-radius:8px;padding:24px;border:1px solid #e5e5e5;">
-      <h2 style="margin:0 0 16px 0;font-size:16px;color:#222222;">${escapeHtmlForMail_(today)}時点の未承認案件レポート</h2>
-      ${buildCaseTableHtml_(`書類が未承認の案件（${unapproved.length}件）`, unapproved)}
-      ${buildCaseTableHtml_(`請求済みだが最終承認が未完了の案件（${billedNotFinalApproved.length}件）`, billedNotFinalApproved)}
-      <p style="margin-top:24px;font-size:11px;color:#999999;">本メールは案件管理・見積書自動作成システムより自動送信されています。</p>
-    </div>
-  </div>`;
+  const htmlBody = buildEmailHtml_({
+    tone: 'info',
+    eyebrow: '未承認案件レポート',
+    headline: `${today}時点の未承認案件`,
+    lead: '承認が済んでいない書類と、請求済みで最終承認を待っている案件の一覧です。',
+    stats: [
+      { label: '書類が未承認', value: unapproved.length },
+      { label: '最終承認待ち', value: billedNotFinalApproved.length },
+    ],
+    contentHtml:
+      buildCaseTableHtml_('書類が未承認の案件', unapproved)
+      + buildCaseTableHtml_('請求済みだが最終承認が未完了の案件', billedNotFinalApproved),
+  });
 
   return { subject, body: lines.join('\n'), htmlBody };
 }
@@ -196,37 +187,47 @@ function defaultCaseTableColumns_() {
     { label: '取引先', value: c => c.clientName },
     { label: '案件名', value: c => c.caseName },
     { label: '担当', value: c => c.staffInCharge, nowrap: true },
-    { label: 'ステータス', value: c => c.status, nowrap: true },
+    { label: 'ステータス', value: c => c.status, badge: true },
   ];
 }
 
 /**
- * レポート用の案件一覧テーブル（HTML）。該当が無い場合はその旨を表示する。
- * @param {string} headline 見出し
+ * レポート用の案件一覧テーブル（HTML）。見出し行と縞模様つきで、該当が無い場合はその旨を表示する。
+ * @param {string} title 表の見出し（件数は自動で添える）
  * @param {Array} cases 案件の配列
- * @param {Array<{label:string, value:function, nowrap:boolean}>} [columns] 列構成（省略時は既定）
+ * @param {Array<{label:string, value:function, nowrap:boolean, badge:boolean, align:string}>} [columns]
+ *   列構成（省略時は既定）。badge は値をステータスのバッジで、align は 'right' で右寄せにする
  */
-function buildCaseTableHtml_(headline, cases, columns) {
+function buildCaseTableHtml_(title, cases, columns) {
   const cols = columns || defaultCaseTableColumns_();
-  const headerCellStyle = 'padding:6px 10px;text-align:left;font-size:11px;color:#666666;border-bottom:2px solid #dddddd;white-space:nowrap;';
-  const cellStyle = 'padding:6px 10px;border-bottom:1px solid #e5e5e5;font-size:12px;color:#222222;';
-  const heading = `<h3 style="margin:20px 0 8px 0;font-size:13px;color:#222222;">${escapeHtmlForMail_(headline)}</h3>`;
+  const heading = buildEmailSectionTitleHtml_(title, cases.length);
 
   if (!cases.length) {
-    return `${heading}<p style="margin:0;font-size:12px;color:#666666;">該当なし</p>`;
+    return `${heading}<div style="padding:16px;border:1px dashed ${EMAIL_BORDER};border-radius:8px;text-align:center;font-size:13px;color:#80868b;">該当する案件はありません</div>`;
   }
 
-  const headerHtml = cols.map(col => `<th style="${headerCellStyle}">${escapeHtmlForMail_(col.label)}</th>`).join('');
-  const rowsHtml = cases.map(c => `
-    <tr>${cols.map(col =>
-      `<td style="${cellStyle}${col.nowrap ? 'white-space:nowrap;' : ''}">${escapeHtmlForMail_(col.value(c))}</td>`
-    ).join('')}</tr>`).join('');
+  const headerHtml = cols.map(col =>
+    `<th style="padding:9px 12px;background-color:#f8f9fa;border-bottom:1px solid ${EMAIL_BORDER};text-align:${col.align || 'left'};font-size:11px;font-weight:bold;color:#5f6368;white-space:nowrap;">${escapeHtmlForMail_(col.label)}</th>`
+  ).join('');
+  const rowsHtml = cases.map((c, i) => {
+    const bg = i % 2 === 1 ? 'background-color:#fafbfc;' : '';
+    const border = i === cases.length - 1 ? '' : `border-bottom:1px solid #f1f3f4;`;
+    return `<tr>${cols.map(col => {
+      const value = col.value(c);
+      const inner = col.badge ? statusBadgeHtml_(value) : escapeHtmlForMail_(value);
+      // 折り返す列は、1文字ずつ縦に崩れないよう最小幅を持たせる
+      const widthStyle = (col.nowrap || col.badge) ? 'white-space:nowrap;' : 'min-width:96px;';
+      return `<td style="padding:10px 12px;${bg}${border}text-align:${col.align || 'left'};font-size:13px;line-height:1.5;color:#202124;vertical-align:top;${widthStyle}">${inner}</td>`;
+    }).join('')}</tr>`;
+  }).join('');
 
   return `${heading}
-    <table style="width:100%;border-collapse:collapse;">
-      <tr>${headerHtml}</tr>
-      ${rowsHtml}
-    </table>`;
+    <div style="overflow-x:auto;border:1px solid ${EMAIL_BORDER};border-radius:8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <tr>${headerHtml}</tr>
+        ${rowsHtml}
+      </table>
+    </div>`;
 }
 
 /**
@@ -327,20 +328,29 @@ function parseStartedAt_(value) {
 /** 放置書類アラートの文面を組み立てる */
 function buildStalledDocumentMessage_(items) {
   const subject = `【要対応】作成中のまま${STALLED_DOCUMENT_ALERT_DAYS}日以上経過した書類があります（${items.length}件）`;
+  const request = '内容をご確認のうえ、承認依頼または案件中止の操作をお願いします。';
 
   const lines = [
     `作成に着手したまま「完成（承認依頼）」が行われていない書類が${items.length}件あります。`,
-    '内容をご確認のうえ、承認依頼または案件中止の操作をお願いします。',
+    request,
     '',
     ...items.map(i => `・${i.caseNo}｜${i.clientName}｜${i.caseName}｜${i.docLabel}｜着手:${i.startedAt}（${i.elapsedDays}日経過）`),
   ];
 
-  const rows = items.map(i => ({
-    label: `${i.caseNo}｜${i.docLabel}`,
-    value: `${i.caseName}（${i.clientName}）／着手 ${i.startedAt}・${i.elapsedDays}日経過`,
-  }));
-  const htmlBody = buildEmailHtml_(
-    `作成中のまま${STALLED_DOCUMENT_ALERT_DAYS}日以上経過した書類があります`, rows, null, null);
+  const htmlBody = buildEmailHtml_({
+    tone: 'warning',
+    eyebrow: '要対応',
+    headline: `作成中のまま${STALLED_DOCUMENT_ALERT_DAYS}日以上経過した書類があります`,
+    lead: `作成に着手したまま「完成（承認依頼）」が行われていない書類です。${request}`,
+    contentHtml: buildCaseTableHtml_('対象の書類', items, [
+      { label: '案件番号', value: i => i.caseNo, nowrap: true },
+      { label: '取引先', value: i => i.clientName },
+      { label: '案件名', value: i => i.caseName },
+      { label: '書類', value: i => i.docLabel, nowrap: true },
+      { label: '着手日時', value: i => i.startedAt, nowrap: true },
+      { label: '経過', value: i => `${i.elapsedDays}日`, nowrap: true, align: 'right' },
+    ]),
+  });
 
   return { subject, body: lines.join('\n'), htmlBody };
 }
@@ -422,8 +432,8 @@ function overdueBillingTableColumns_() {
     { label: '案件名', value: c => c.caseName },
     { label: '担当', value: c => c.staffInCharge, nowrap: true },
     { label: '請求予定', value: c => c.billingSchedule, nowrap: true },
-    { label: '遅れ', value: c => `${c.monthsOverdue}ヶ月`, nowrap: true },
-    { label: 'ステータス', value: c => c.status, nowrap: true },
+    { label: '遅れ', value: c => `${c.monthsOverdue}ヶ月`, nowrap: true, align: 'right' },
+    { label: 'ステータス', value: c => c.status, badge: true },
   ];
 }
 
@@ -437,23 +447,27 @@ function overdueBillingTextLine_(c) {
 function buildOverdueBillingSummaryMessage_(cases) {
   const today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy年M月d日');
   const subject = `【請求漏れリマインド】請求予定を過ぎた未請求の案件が${cases.length}件あります`;
+  const request = '請求手続きまたは請求予定の見直しをお願いします。';
 
   const body = [
     `${today}時点で、請求予定の月を過ぎたまま請求ステータスが「未請求」の案件が${cases.length}件あります。`,
-    '内容をご確認のうえ、請求手続きまたは請求予定の見直しをお願いします。',
+    `内容をご確認のうえ、${request}`,
     '',
     ...cases.map(overdueBillingTextLine_),
   ].join('\n');
 
-  const htmlBody = `
-  <div style="font-family:'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;max-width:680px;margin:0 auto;padding:24px;background-color:#f7f7f7;">
-    <div style="background-color:#ffffff;border-radius:8px;padding:24px;border:1px solid #e5e5e5;">
-      <h2 style="margin:0 0 8px 0;font-size:16px;color:#222222;">請求予定を過ぎた未請求の案件があります</h2>
-      <p style="margin:0;font-size:12px;color:#666666;">${escapeHtmlForMail_(today)}時点。請求手続きまたは請求予定の見直しをお願いします。</p>
-      ${buildCaseTableHtml_(`対象案件（${cases.length}件）`, cases, overdueBillingTableColumns_())}
-      <p style="margin-top:24px;font-size:11px;color:#999999;">本メールは案件管理・見積書自動作成システムより自動送信されています。</p>
-    </div>
-  </div>`;
+  const maxOverdue = cases.reduce((max, c) => Math.max(max, c.monthsOverdue || 0), 0);
+  const htmlBody = buildEmailHtml_({
+    tone: 'warning',
+    eyebrow: '請求漏れリマインド',
+    headline: '請求予定を過ぎた未請求の案件があります',
+    lead: `${today}時点で、請求予定の月を過ぎたまま「未請求」の案件です。${request}`,
+    stats: [
+      { label: '対象の案件', value: cases.length },
+      { label: '最大の遅れ', value: maxOverdue, unit: 'ヶ月', color: EMAIL_TONES.danger.color },
+    ],
+    contentHtml: buildCaseTableHtml_('対象の案件', cases, overdueBillingTableColumns_()),
+  });
 
   return { subject, body, htmlBody };
 }
@@ -461,19 +475,24 @@ function buildOverdueBillingSummaryMessage_(cases) {
 /** 担当者宛（自分の担当ぶんのみ）の文面 */
 function buildOverdueBillingStaffMessage_(cases) {
   const subject = `【要対応】請求予定を過ぎた未請求の案件があります（${cases.length}件）`;
+  const request = '請求手続きを進めるか、請求予定の見直しをお願いします。';
 
   const body = [
     `ご担当の案件のうち、請求予定の月を過ぎたまま請求ステータスが「未請求」のものが${cases.length}件あります。`,
-    '請求手続きを進めるか、請求予定の見直しをお願いします。',
+    request,
     '',
     ...cases.map(overdueBillingTextLine_),
   ].join('\n');
 
-  const rows = cases.map(c => ({
-    label: c.caseNo,
-    value: `${c.caseName}（${c.clientName}）／請求予定 ${c.billingSchedule}・${c.monthsOverdue}ヶ月遅れ／${c.status}`,
-  }));
-  const htmlBody = buildEmailHtml_('請求予定を過ぎた未請求の案件があります', rows, null, null);
+  // 本人宛のため「担当」列は省く
+  const columns = overdueBillingTableColumns_().filter(col => col.label !== '担当');
+  const htmlBody = buildEmailHtml_({
+    tone: 'warning',
+    eyebrow: '要対応',
+    headline: '請求予定を過ぎた未請求の案件があります',
+    lead: `ご担当の案件のうち、請求予定の月を過ぎたまま「未請求」のものです。${request}`,
+    contentHtml: buildCaseTableHtml_('対象の案件', cases, columns),
+  });
 
   return { subject, body, htmlBody };
 }
