@@ -55,6 +55,13 @@ function onOpen() {
  */
 function onOpenInstallable(e) {
   try {
+    // インストール型トリガーは、誰が開いても「登録した人」の権限で動く。ここで開いた
+    // サイドバーからの操作も登録した人として実行されてしまうため（他人のトリガーで開いた
+    // サイドバーでは、実行者が登録した人に置き換わる）、登録した本人が開いたときだけ表示する。
+    // 本人以外は、本人のトリガー・単純トリガーの onOpen・メニューから開いたサイドバーを使う。
+    const owner = Session.getEffectiveUser().getEmail();
+    const opener = Session.getActiveUser().getEmail();
+    if (!opener || opener.toLowerCase() !== owner.toLowerCase()) return;
     showSidebar();
   } catch (err) {
     console.error(`onOpenInstallable error: ${err && err.stack ? err.stack : err}`);

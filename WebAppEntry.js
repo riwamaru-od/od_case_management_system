@@ -19,10 +19,12 @@
  * Google Workspace ドメインが無いため DOMAIN 指定はドメイン所属を解決できずに失敗する。
  * ANYONE 指定に切り替えて解決したが、その代償として Google は doPost 内で
  * Session.getActiveUser() に呼び出し元の身元を渡さなくなる（空文字になる）。
- * そのため本人確認は、callAsAdmin_() が呼び出し元自身の実行コンテキストで取得した
- * メールアドレスを callerEmail としてリクエストに含め、doPost 側でそれを
- * ACTIVE_USER_EMAIL_OVERRIDE_（Utils.gs）にセットして getActiveUserEmail_() に
- * 使わせる方式で代替している。
+ * そのため本人確認は、callAsAdmin_() が呼び出し元自身のOAuthアクセストークンを
+ * callerToken としてリクエストに含め、doPost 側でそのトークンをGoogleの userinfo に
+ * 照会して得たメールアドレスを ACTIVE_USER_EMAIL_OVERRIDE_（Utils.gs）にセットし、
+ * getActiveUserEmail_() に使わせる方式で代替している。
+ * トークンは本人にしか発行されないため、URLを知っている人でも他人にはなりすませない
+ * （以前はメールアドレスそのものを受け取っていたため、なりすましが可能だった）。
  *
  * ブラウザ側（JavaScript.html）からは直接叩かない・叩けない設計。呼び出しは常にサーバー間
  * （UrlFetchApp）で行う。
@@ -66,7 +68,14 @@ function doPost(e) {
     return jsonResponse_({ error: { message: `不明な操作です: ${body.action}`, name: 'AppError' } });
   }
 
-  ACTIVE_USER_EMAIL_OVERRIDE_ = body.callerEmail || null;
+  let callerEmail;
+  try {
+    callerEmail = verifyCallerToken_(body.callerToken);
+  } catch (err) {
+    return jsonResponse_({ error: { message: err.message, name: err.name || 'AppError' } });
+  }
+
+  ACTIVE_USER_EMAIL_OVERRIDE_ = callerEmail;
   try {
     const result = action(body.params || {});
     return jsonResponse_({ result: result });
@@ -77,6 +86,42 @@ function doPost(e) {
   } finally {
     ACTIVE_USER_EMAIL_OVERRIDE_ = null;
   }
+}
+
+/** 呼び出し元のアクセストークンの持ち主を確かめる照会先 */
+const CALLER_USERINFO_URL_ = 'https://www.googleapis.com/oauth2/v3/userinfo';
+
+/**
+ * callAsAdmin_() から渡されたアクセストークンをGoogleに照会し、持ち主のメールアドレスを返す。
+ * トークンが無い・無効・期限切れ、またはメールアドレスが確認済みでない場合は例外を投げる。
+ * トークンはURLに載せず、Authorizationヘッダーで送る（ログ等に残さないため）。
+ */
+function verifyCallerToken_(token) {
+  if (!token) {
+    throw AppError_('UNAUTHENTICATED', '操作した人を確認できませんでした。シートを開き直してから、もう一度お試しください。');
+  }
+  // 照会のぶん操作が遅くなるため、確認済みのトークンは10分間覚えておく。
+  // キーはトークンのハッシュにし、トークンそのものはキャッシュに残さない。
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'CALLER_' + Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token));
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const response = UrlFetchApp.fetch(CALLER_USERINFO_URL_, {
+    headers: { Authorization: 'Bearer ' + token },
+    muteHttpExceptions: true,
+  });
+  if (response.getResponseCode() !== 200) {
+    throw AppError_('UNAUTHENTICATED',
+      `操作した人を確認できませんでした（HTTP ${response.getResponseCode()}）。シートを開き直してから、もう一度お試しください。`);
+  }
+  const info = JSON.parse(response.getContentText());
+  if (!info.email || info.email_verified !== true) {
+    throw AppError_('UNAUTHENTICATED', '操作した人のメールアドレスを確認できませんでした。管理者へ連絡してください。');
+  }
+  cache.put(cacheKey, info.email, 600);
+  return info.email;
 }
 
 function jsonResponse_(obj) {
