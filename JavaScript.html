@@ -120,11 +120,36 @@
     if (!canRunAction()) return;
     const fnName = SIMPLE_ACTIONS[action];
     if (!fnName) return;
+    // 作成・再作成・PDF出力は結果のURLを新しいタブで開く。ブラウザはクリックから数秒を過ぎた
+    // window.open をポップアップとしてブロックするため、クリックした時点で空のタブを開いておき、
+    // 処理が終わったらそのタブへURLを読み込む。
+    const pendingTab = openPendingTab();
     setBusy(true);
     google.script.run
-      .withSuccessHandler(result => { setBusy(false); handleActionResult(result); refreshData(currentCaseNo); })
-      .withFailureHandler(err => { setBusy(false); showToast(err && err.message ? err.message : String(err), true); })
+      .withSuccessHandler(result => { setBusy(false); handleActionResult(result, pendingTab); refreshData(currentCaseNo); })
+      .withFailureHandler(err => {
+        setBusy(false);
+        closePendingTab(pendingTab);
+        showToast(err && err.message ? err.message : String(err), true);
+      })
       [fnName](currentCaseNo);
+  }
+
+  /** 処理中に表示しておく空のタブを開く。ブロックされた場合は null */
+  function openPendingTab() {
+    const tab = window.open('', '_blank');
+    if (!tab) return null;
+    try {
+      tab.document.title = '処理中…';
+      tab.document.body.textContent = '処理中です。完了するとこのタブに書類が表示されます。';
+    } catch (e) {
+      // 表示文言を入れられなくても、タブ自体は使える
+    }
+    return tab;
+  }
+
+  function closePendingTab(tab) {
+    if (tab && !tab.closed) tab.close();
   }
 
   /** コメント入力が必要な操作（完成／承認／差し戻し／最終承認）のモーダルを開く */
@@ -180,12 +205,19 @@
     }
   }
 
-  /** 印刷/出力アクションの結果としてURLが返ってきた場合、新規タブで開く */
-  function handleActionResult(result) {
+  /**
+   * 印刷/出力アクションの結果としてURLが返ってきた場合、新規タブで開く。
+   * pendingTab（クリック時に開いておいた空のタブ）があればそこへ読み込み、URLが無ければ閉じる。
+   */
+  function handleActionResult(result, pendingTab) {
+    const url = result && (result.printUrl || result.pdfUrl || result.url);
+    if (url && pendingTab && !pendingTab.closed) {
+      pendingTab.location.href = url;
+    } else {
+      closePendingTab(pendingTab);
+      if (url) window.open(url, '_blank');
+    }
     if (!result) return;
-    if (result.printUrl) window.open(result.printUrl, '_blank');
-    if (result.pdfUrl) window.open(result.pdfUrl, '_blank');
-    if (result.url) window.open(result.url, '_blank');
     showToast('処理が完了しました。');
   }
 

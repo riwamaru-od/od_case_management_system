@@ -96,11 +96,10 @@ function completeDocumentForCase_(docTypeKey, caseNo, comment, approverEmail) {
     if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = '';
     setCaseFields_(caseNo, fieldUpdates);
 
-    const msg = buildApprovalRequestMessage_(docType.label, {
+    notifyApprovalRequest_(docType.label, {
       caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, clientName: caseInfo.clientName,
       requesterName: staff ? staff.name : email, docUrl: file.getUrl(),
-    }, comment);
-    notifyApprovalRequest_(msg, designatedApprover ? designatedApprover.email : '');
+    }, comment, designatedApprover ? designatedApprover.email : '');
 
     const logDetail = [comment || '', designatedApprover ? `承認者指定: ${designatedApprover.name}` : '']
       .filter(Boolean).join(' / ');
@@ -216,6 +215,15 @@ function rejectDocumentForCase_(docTypeKey, caseNo, comment) {
     // （過去に一度承認された書類を再作成→差し戻し、という流れでも確実に止める）
     if (docType.col.reapprovalPending) fieldUpdates[docType.col.reapprovalPending] = formatDateTime_(new Date());
     setCaseFields_(caseNo, fieldUpdates);
+
+    // 作成者へ通知（差し戻し理由が分かるようコメントを含める）
+    const rejecter = findStaffByEmail_(email);
+    const creatorStaff = getAllStaff_().find(s => s.name === caseInfo[`${docTypeKey}Creator`]);
+    const notifyMsg = buildRejectedMessage_(docType.label, {
+      caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, docUrl: file.getUrl(),
+      rejecterName: rejecter ? rejecter.name : email,
+    }, comment);
+    if (creatorStaff) notifyStaff_(creatorStaff.email, notifyMsg.subject, notifyMsg.body, notifyMsg.htmlBody);
 
     appendOperationLog_(caseNo, `${docType.label}差し戻し`, comment || '', false);
 

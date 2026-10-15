@@ -23,25 +23,22 @@ function finalApproveForCase_(caseNo, comment) {
 
     const staff = findStaffByEmail_(email);
     const now = new Date();
+    const approverName = staff ? staff.name : email;
 
     setCaseFields_(caseNo, {
       [CASE_COLS.STATUS]: STATUS.FINAL_APPROVED,
       [CASE_COLS.BILLING_STATUS]: BILLING_STATUS.FINAL_APPROVED,
-      [CASE_COLS.FINAL_APPROVER]: staff ? staff.name : email,
+      [CASE_COLS.FINAL_APPROVER]: approverName,
       [CASE_COLS.FINAL_APPROVED_AT]: formatDateTime_(now),
     });
 
     // 作成者（見積書作成者を代表として通知）へ完了連絡
     const creatorStaff = getAllStaff_().find(s => s.name === caseInfo.quoteCreator);
     if (creatorStaff) {
-      const subject = `【最終承認完了】${caseInfo.caseName}`;
-      const lines = [
-        `案件番号: ${caseInfo.caseNo}`,
-        `案件名: ${caseInfo.caseName}`,
-        '最終承認が完了し、案件がクローズされました。',
-      ];
-      if (comment) lines.push(`コメント: ${comment}`);
-      notifyStaff_(creatorStaff.email, subject, lines.join('\n'));
+      const msg = buildFinalApprovedMessage_({
+        caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, approverName: approverName,
+      }, comment);
+      notifyStaff_(creatorStaff.email, msg.subject, msg.body, msg.htmlBody);
     }
 
     // 全案件DBへ反映済みの状態で、メイン画面UIから当該行を削除する

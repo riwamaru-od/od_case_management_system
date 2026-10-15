@@ -13,7 +13,11 @@ function getAllStaff_() {
   const sheet = getStaffDbSheet_();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  const values = sheet.getRange(2, 1, lastRow - 1, STAFF_COLS.ROLE_6).getValues();
+  // 通知チェックボックス列を追加する前のシートでも読めるよう、実在する列数までに留める
+  const lastCol = Math.min(STAFF_LAST_COL, sheet.getMaxColumns());
+  const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  // チェックボックスのセルは true/false を返す。それ以外（空欄・列なし）は「未設定」として null にする
+  const notifyFlag = (row, col) => (typeof row[col - 1] === 'boolean' ? row[col - 1] : null);
   const staff = values
     .filter(row => row[STAFF_COLS.EMAIL - 1])
     .map(row => ({
@@ -23,6 +27,8 @@ function getAllStaff_() {
       chatworkRoomId: row[STAFF_COLS.CHATWORK_ROOM_ID - 1],
       department: row[STAFF_COLS.DEPARTMENT - 1],
       roles: STAFF_ROLE_COLS.map(colIndex => row[colIndex - 1]).filter(Boolean),
+      mailNotify: notifyFlag(row, STAFF_COLS.MAIL_NOTIFY),
+      chatNotify: notifyFlag(row, STAFF_COLS.CHAT_NOTIFY),
     }));
 
   cache.put('ALL_STAFF', JSON.stringify(staff), 300); // 5分キャッシュ

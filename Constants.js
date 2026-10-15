@@ -130,7 +130,10 @@ const STAFF_COLS = {
   ROLE_4: 9,
   ROLE_5: 10,
   ROLE_6: 11,
+  MAIL_NOTIFY: 12,         // メール通知（チェックボックス）
+  CHAT_NOTIFY: 13,         // Chat通知（チェックボックス。Chatworkへ送る）
 };
+const STAFF_LAST_COL = STAFF_COLS.CHAT_NOTIFY;
 const STAFF_ROLE_COLS = [STAFF_COLS.ROLE_1, STAFF_COLS.ROLE_2, STAFF_COLS.ROLE_3,
   STAFF_COLS.ROLE_4, STAFF_COLS.ROLE_5, STAFF_COLS.ROLE_6];
 
@@ -414,6 +417,31 @@ const PERIOD_BASE_YEAR = 2026; // この年の5/1開始分が17期
 const PERIOD_SWITCH_MONTH_INDEX = 4; // 0始まりで4 = 5月
 const PERIOD_SWITCH_DAY = 1;
 const PERIOD_PREP_MONTH_OFFSET = 1; // 切り替えの1ヶ月前(4/1)に翌期の準備をする
+
+// ------------------------------------------------------------------
+// 旧「案件番号一覧」からの移行（CaseImportService.gs 参照）
+// 移行する案件を貼り付けておくシート。A〜G列の並びは MIGRATION_COLS のとおりで、
+// H列以降（旧一覧の値や確認メモ）は読まないため、そのまま残しておいてよい。
+// ------------------------------------------------------------------
+const MIGRATION_SHEET_NAME = '移行データ';
+const MIGRATION_DATA_START_ROW = 2; // 1行目は見出し
+const MIGRATION_COLS = {
+  CASE_NO: 1,
+  CLIENT_NAME: 2,
+  CASE_NAME: 3,
+  END_SCHEDULE: 4,
+  BILLING_SCHEDULE: 5,
+  STAFF_IN_CHARGE: 6,
+  KIND: 7, // 移行区分（MIGRATION_KIND のいずれか）
+};
+const MIGRATION_LAST_COL = 7;
+const MIGRATION_KIND = {
+  OPEN: '進行中', // 表示シートと全案件DBへ「案件登録済み・未請求」で登録する
+  CLOSED: '完了', // 旧来の運用で請求まで終えた案件。全案件DBにだけ「最終承認済み」で記録する
+  CANCELLED: '中止', // 旧来の運用で中止になった案件。全案件DBにだけ「中止」で記録する
+};
+// 完了として移行した案件の最終承認者欄に入れる文言（システム上で承認された案件と見分けるため）
+const MIGRATION_FINAL_APPROVER_LABEL = '（旧一覧から移行）';
 
 // 原本（マスター）シート名。期の切替時にこれをコピーして新シートを作る。
 const MASTER_UI_SHEET_NAME = '原本_表示';

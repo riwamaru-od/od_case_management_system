@@ -10,20 +10,20 @@
  *
  * 注意: access: ANYONE でデプロイしているため、転送先の doPost 内では
  * Session.getActiveUser() は呼び出し元本人を解決しない（空になる）。
- * そのため本人確認は、呼び出し元自身の（この関数が呼ばれている、本来の）
- * 実行コンテキストで getActiveUserEmail_() を呼んで得たメールアドレスを
- * callerEmail としてリクエストに含め、転送先で ACTIVE_USER_EMAIL_OVERRIDE_
- * として使わせる方式で代替している（Utils.gs 参照）。
+ * そのため呼び出し元自身のOAuthアクセストークンを callerToken としてリクエストに含め、
+ * 転送先でそのトークンをGoogleに照会して本人のメールアドレスを確かめる
+ * （verifyCallerToken_ / WebAppEntry.gs）。メールアドレスそのものは送らない。
+ * 自己申告のアドレスを信用すると、URLを知っている人が他人になりすませてしまうため。
  */
 function callAsAdmin_(action, params) {
   const url = getProp_(PROP_KEYS.WEBAPP_URL);
-  const callerEmail = getActiveUserEmail_();
+  const callerToken = ScriptApp.getOAuthToken();
 
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ action, params, callerEmail }),
-    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    payload: JSON.stringify({ action, params, callerToken }),
+    headers: { Authorization: 'Bearer ' + callerToken },
     muteHttpExceptions: true,
   });
 
