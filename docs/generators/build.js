@@ -13,6 +13,7 @@ const DOCUMENTS = [
   { module: './usermanual', file: 'ユーザー用マニュアル_v2.4.docx' },
   { module: './setup', file: '初期設定マニュアル_v2.4.docx' },
   { module: './testchecklist', file: 'ユーザーテスト_チェックリスト_v2.4.docx' },
+  { module: './roadmap', file: '導入ロードマップ.docx' },
 ];
 
 (async () => {
