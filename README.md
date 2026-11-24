@@ -63,8 +63,22 @@ WebAppEntry.js  doPost()        ← 管理用アカウントの権限で実行
 Webアプリを `access: ANYONE` でデプロイしているため、`doPost` の中では
 `Session.getActiveUser()` が呼び出し元を返しません。そのため `callAsAdmin_` が
 呼び出し元自身のOAuthアクセストークンを `callerToken` として転送し、転送先の
-`verifyCallerToken_`（WebAppEntry.js）がそれをGoogleの userinfo に照会して本人の
-メールアドレスを取り出し、`ACTIVE_USER_EMAIL_OVERRIDE_`（Utils.js）に設定しています。
+`verifyCallerToken_`（WebAppEntry.js）がそれをGoogleの tokeninfo に照会し、
+トークンの発行先（azp）がこのスクリプト自身であることと、確認済みのメールアドレスを
+確かめたうえで `ACTIVE_USER_EMAIL_OVERRIDE_`（Utils.js）に設定しています。
+発行先を確かめるのは、他のアプリ向けに発行されたトークンを流用したなりすましを防ぐためです。
+さらに、社員DBに登録されていない人の操作は、ロール不要の操作（案件中止など）も含めて
+すべて拒否し、パラメーター（案件番号・コメント・承認者）は型と長さを検証してから処理に渡します。
+
+### その他の防御
+
+- **数式の注入対策**: コメントなど利用者の入力をシート（書類・操作ログ）へ書き込むときは
+  `toSheetText_`（Utils.js）を通し、先頭が `=` `+` `-` `@` の値を文字列として保存します。
+- **トークンの送り先の検証**: `callAsAdmin_` は、送り先の `WEBAPP_URL` が
+  `https://script.google.com/.../macros/s/<ID>/exec` の形式でなければ送信しません。
+- **管理者向け関数の実行者確認**: 末尾が `_` でない関数はサイドバーから誰でも呼べるため、
+  テストデータのリセット・案件移行・トリガー登録・WebアプリURL設定・バックアップ・アーカイブ等は
+  `assertAdminOperator_`（Utils.js）で、管理用アカウントか Admin ロールの社員以外を拒否します。
 
 メールアドレスそのものを受け取る方式にすると、WebアプリのURLを知っている人
 （スプレッドシートの編集者はスクリプトプロパティから見られる）が、承認者などの

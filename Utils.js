@@ -80,6 +80,38 @@ function getActiveUserEmail_() {
   return email;
 }
 
+/**
+ * 利用者が入力した文字列をシートへ書き込む前に、数式として解釈されないようにする。
+ * 先頭が = + - @ （および先頭のタブ・改行）だと setValue / appendRow が数式として扱い、
+ * IMPORTXML や IMAGE などで管理用アカウントのシートの内容を外部へ送らせることができてしまう。
+ * 先頭にアポストロフィを付けると、セル上の表示はそのままで「文字列」として保存される。
+ */
+function toSheetText_(value) {
+  if (typeof value !== 'string') return value;
+  return /^[=+\-@\t\r\n]/.test(value) ? `'${value}` : value;
+}
+
+/**
+ * 管理者向けの関数（スクリプトエディタ・管理者用メニューから実行するもの）の実行者を確かめる。
+ * サイドバーの google.script.run からは末尾が「_」でない関数を誰でも呼べてしまうため、
+ * 管理用アカウント（ADMIN_TRIGGER_ACCOUNT_EMAIL）か、社員DBで Admin ロールを持つ人以外は弾く。
+ * 初期設定の途中で ADMIN_TRIGGER_ACCOUNT_EMAIL が未設定の間だけは、確認せずに通す。
+ */
+function assertAdminOperator_(actionLabel) {
+  const adminEmail = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.ADMIN_TRIGGER_ACCOUNT_EMAIL);
+  if (!adminEmail) return;
+  const normalize = s => String(s || '').trim().toLowerCase();
+  let executor = '';
+  try {
+    executor = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || '';
+  } catch (e) {
+    executor = '';
+  }
+  if (executor && normalize(executor) === normalize(adminEmail)) return;
+  if (executor && hasAnyRole_(executor, [ROLES.ADMIN])) return;
+  throw AppError_('FORBIDDEN', `この操作（${actionLabel}）は管理者のみ実行できます。`);
+}
+
 /** 日時を「yyyy/MM/dd HH:mm」形式の文字列にする */
 function formatDateTime_(date) {
   return Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy/MM/dd HH:mm');

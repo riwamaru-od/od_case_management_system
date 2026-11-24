@@ -229,6 +229,7 @@ function disableSidebarAutoOpen() {
  * あわせて、実行者本人のサイドバー自動表示トリガーも登録する。
  */
 function installTriggers() {
+  assertAdminOperator_('トリガーの登録');
   deleteMyTriggersByHandler_('onEditInstallable');
   deleteMyTriggersByHandler_('dailyScheduledTasks');
   deleteMyTriggersByHandler_('morningScheduledTasks');

@@ -39,11 +39,12 @@ function appendOperationLog_(caseNo, actionLabel, detail, isError, fallbackActor
   }
   sheet.appendRow([
     formatDateTime_(new Date()),
-    name,
-    email,
-    caseNo || '',
-    actionLabel,
+    toSheetText_(String(name)),
+    toSheetText_(email),
+    toSheetText_(String(caseNo || '')),
+    toSheetText_(String(actionLabel)),
     isError ? 'エラー' : '成功',
-    detail || '',
+    // コメント等の利用者入力を含むため、数式として解釈させない（toSheetText_ 参照）
+    toSheetText_(String(detail || '')),
   ]);
 }

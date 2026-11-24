@@ -102,6 +102,9 @@ function checkAndRepairCaseSheets() {
   ].join('\n'));
 }
 
+/** WebアプリのURLとして受け付ける形式（Apps Script の /macros/s/<デプロイID>/exec のみ） */
+const WEBAPP_URL_PATTERN_ = /^https:\/\/script\.google\.com\/(a\/macros\/[A-Za-z0-9.-]+|macros)\/s\/[A-Za-z0-9_-]+\/exec$/;
+
 /**
  * WEBAPP_URL スクリプトプロパティを設定する（見出しUIなしで呼べる版）。
  * 新しいデプロイを作成してURLが変わった場合、この関数の再実行が必要
@@ -109,7 +112,7 @@ function checkAndRepairCaseSheets() {
  */
 function setWebAppUrl_(url) {
   const trimmed = String(url || '').trim();
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(trimmed)) {
+  if (!WEBAPP_URL_PATTERN_.test(trimmed)) {
     throw AppError_('INVALID_WEBAPP_URL', `WebアプリのURLの形式が正しくありません: ${trimmed}`);
   }
   PropertiesService.getScriptProperties().setProperty(PROP_KEYS.WEBAPP_URL, trimmed);
@@ -117,6 +120,7 @@ function setWebAppUrl_(url) {
 
 /** メニュー「WebアプリのURLを設定する」から呼ばれる */
 function setWebAppUrlFromPrompt() {
+  assertAdminOperator_('WebアプリのURL設定');
   const ui = SpreadsheetApp.getUi();
   const response = ui.prompt(
     'WebアプリのURLを設定',

@@ -218,6 +218,7 @@ function archiveOldPeriodSheetsIfNeeded_() {
 
 /** メニュー「過去期のデータをアーカイブする」から呼ばれる */
 function archiveOldPeriodSheetsManually() {
+  assertAdminOperator_('過去期のアーカイブ');
   const ui = SpreadsheetApp.getUi();
   const candidates = findArchivablePeriods_();
 

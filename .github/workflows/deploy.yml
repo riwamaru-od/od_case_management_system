@@ -5,24 +5,47 @@ on:
     branches:
       - main
 
+# このワークフローはリポジトリを読むだけでよい（GITHUB_TOKEN の権限を最小にする）
+permissions:
+  contents: read
+
+# 連続して push された場合に、古い push が新しい push の後から反映されないようにする
+concurrency:
+  group: deploy-gas
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      # サードパーティのアクションはタグの付け替えによる改ざんを避けるため、コミットSHAで固定する
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '20'
+          node-version: '24'
 
+      # バージョンを固定し、意図しないメジャー更新や悪意ある新版を取り込まないようにする
       - name: Install clasp
-        run: npm install -g @google/clasp
+        run: npm install -g @google/clasp@3.4.1
 
+      # secret をスクリプト本文へ直接埋め込むと、引用符を含む値でシェルが壊れたり
+      # コマンドとして解釈されたりするため、環境変数経由で渡す
       - name: Create clasprc.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
 
       - name: Deploy to GAS
         run: clasp push --force
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f ~/.clasprc.json

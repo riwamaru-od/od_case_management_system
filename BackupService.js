@@ -106,6 +106,7 @@ function backupDatabasesIfNeeded_() {
 
 /** メニュー「今すぐバックアップを作成する」から呼ばれる */
 function createDatabaseBackupManually() {
+  assertAdminOperator_('バックアップの作成');
   const ui = SpreadsheetApp.getUi();
   try {
     backupDatabasesIfNeeded_();
