@@ -189,17 +189,33 @@ function copyRangeAcrossSpreadsheets_(sourceRange, targetRange) {
  * そのため URL からファイルIDを取り出し、DriveApp 経由で画像データそのものを取得して挿入する
  * （スクリプトの閲覧権限があれば取得できるため、ファイルを一般公開する必要も無い）。
  */
-function insertSealImage_(file, cells, docType) {
-  const source = getSealImageSource_();
-  if (!source) return; // 未設定（警告ログ済み）
+function insertSealImage_(file, cells, docType, knownSheet) {
+  // 挿入できると分かっている画像（元画像または縮小版）を覚えていれば、それをそのまま使う。
+  // 社印画像が大きい場合、毎回「元画像のダウンロード → 挿入失敗 → 縮小版の取得」を
+  // 繰り返すと承認のたびに数秒かかるため（動作速度の改善）。
+  const cachedBlob = getCachedSealBlob_();
+  const source = cachedBlob ? null : getSealImageSource_();
+  if (!cachedBlob && !source) return; // 未設定（警告ログ済み）
+  perfMark_('seal:source');
 
-  const sheet = getPrimarySheet_(file, docType);
+  // 呼び出し元で既に開いているシートがあれば、開き直さずにそれを使う
+  const sheet = knownSheet || getPrimarySheet_(file, docType);
   const range = sheet.getRange(cells.SEAL_IMAGE_RANGE);
   removeSealImages_(sheet, range); // 再承認時などに二重で押印されないようにする
-  const image = insertSealBlobWithFallback_(sheet, source, range);
+  perfMark_('seal:removeOld');
+  let image;
+  if (cachedBlob) {
+    const offsetY = calcSealImageOffsetY_(sheet, range.getRow());
+    perfMark_('seal:offset');
+    image = sheet.insertImage(cachedBlob, range.getColumn(), range.getRow(), SEAL_IMAGE_OFFSET_X_PX, offsetY);
+  } else {
+    image = insertSealBlobWithFallback_(sheet, source, range);
+  }
+  perfMark_('seal:insert');
   image.setWidth(SEAL_IMAGE_WIDTH_PX);
   image.setHeight(SEAL_IMAGE_HEIGHT_PX);
   SpreadsheetApp.flush();
+  perfMark_('seal:resize+flush');
   return image;
 }
 
@@ -225,12 +241,21 @@ function calcSealImageOffsetY_(sheet, anchorRow) {
     console.warn(`社印のアンカー行(${anchorRow})が下端合わせの行(${SEAL_IMAGE_BOTTOM_ROW})より下のため、縦位置の調整をしません。`);
     return 0;
   }
+  // 行の高さを1行ずつ読むと押印のたびに時間がかかるため、計算結果を1時間だけ覚えておく。
+  // 書類はすべて同じテンプレートから作られるため、シート名（書類種別）と行で決まる。
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `SEAL_OFFSET_Y_${sheet.getName()}_${anchorRow}_${SEAL_IMAGE_BOTTOM_ROW}_${SEAL_IMAGE_HEIGHT_PX}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== null && cached !== '' && !isNaN(Number(cached))) return Number(cached);
+
   let heightToBottom = 0;
   for (let row = anchorRow; row <= SEAL_IMAGE_BOTTOM_ROW; row++) {
     heightToBottom += sheet.getRowHeight(row);
   }
   // insertImage のオフセットに負の値は指定できないため、画像の方が高い場合は0にする
-  return Math.max(0, heightToBottom - SEAL_IMAGE_HEIGHT_PX);
+  const offsetY = Math.max(0, heightToBottom - SEAL_IMAGE_HEIGHT_PX);
+  cache.put(cacheKey, String(offsetY), 3600);
+  return offsetY;
 }
 
 /**
@@ -245,7 +270,9 @@ function insertSealBlobWithFallback_(sheet, source, range) {
   const row = range.getRow();
   const offsetY = calcSealImageOffsetY_(sheet, row);
   try {
-    return sheet.insertImage(source.blob, col, row, SEAL_IMAGE_OFFSET_X_PX, offsetY);
+    const image = sheet.insertImage(source.blob, col, row, SEAL_IMAGE_OFFSET_X_PX, offsetY);
+    cacheSealBlob_(source.blob);
+    return image;
   } catch (e) {
     console.warn(`社印画像の直接挿入に失敗したため、縮小版で再試行します: ${e}`);
     const thumbnail = getSealThumbnailBlob_(source.file);
@@ -255,8 +282,71 @@ function insertSealBlobWithFallback_(sheet, source, range) {
         + `（上限: 2MB・100万画素 / 現在: ${Math.round(source.blob.getBytes().length / 1024)}KB）。`
         + '縮小版の取得にも失敗したため、社印画像そのものを小さいPNG（例: 300x300px程度）に差し替えてください。');
     }
-    return sheet.insertImage(thumbnail, col, row, SEAL_IMAGE_OFFSET_X_PX, offsetY);
+    const image = sheet.insertImage(thumbnail, col, row, SEAL_IMAGE_OFFSET_X_PX, offsetY);
+    cacheSealBlob_(thumbnail);
+    return image;
   }
+}
+
+/** 挿入できた社印画像を覚えておく時間（秒）。社印を差し替えても、最長でこの時間で反映される */
+const SEAL_BLOB_CACHE_TTL_SEC_ = 21600;
+/** キャッシュ1件あたりの上限（100KB）を超えないよう、Base64文字列をこの長さで分割して保存する */
+const SEAL_BLOB_CACHE_CHUNK_ = 90000;
+const SEAL_BLOB_CACHE_MAX_CHUNKS_ = 20;
+
+/** 社印のキャッシュキー。設定（COMPANY_SEAL_IMAGE_URL）が変われば別のキーになる */
+function sealBlobCacheKey_() {
+  const sealProp = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.COMPANY_SEAL_IMAGE_URL);
+  if (!sealProp) return null;
+  return 'SEAL_BLOB_' + Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, sealProp));
+}
+
+/** 挿入に成功した社印画像を、次回以降そのまま使えるよう保存する（失敗しても押印には影響させない） */
+function cacheSealBlob_(blob) {
+  try {
+    const key = sealBlobCacheKey_();
+    if (!key || !blob) return;
+    const data = Utilities.base64Encode(blob.getBytes());
+    const chunks = [];
+    for (let i = 0; i < data.length; i += SEAL_BLOB_CACHE_CHUNK_) {
+      chunks.push(data.slice(i, i + SEAL_BLOB_CACHE_CHUNK_));
+    }
+    if (chunks.length > SEAL_BLOB_CACHE_MAX_CHUNKS_) return; // 大きすぎるものは覚えない
+    const entries = {};
+    chunks.forEach((chunk, i) => { entries[`${key}_${i}`] = chunk; });
+    entries[`${key}_meta`] = JSON.stringify({ chunks: chunks.length, type: blob.getContentType() || 'image/png' });
+    CacheService.getScriptCache().putAll(entries, SEAL_BLOB_CACHE_TTL_SEC_);
+  } catch (e) {
+    console.warn(`社印画像のキャッシュに失敗しました: ${e}`);
+  }
+}
+
+/** 保存しておいた社印画像を取り出す。無い・欠けている場合は null */
+function getCachedSealBlob_() {
+  try {
+    const key = sealBlobCacheKey_();
+    if (!key) return null;
+    const cache = CacheService.getScriptCache();
+    const metaText = cache.get(`${key}_meta`);
+    if (!metaText) return null;
+    const meta = JSON.parse(metaText);
+    const keys = [];
+    for (let i = 0; i < meta.chunks; i++) keys.push(`${key}_${i}`);
+    const found = cache.getAll(keys);
+    if (keys.some(k => !found[k])) return null;
+    const data = keys.map(k => found[k]).join('');
+    return Utilities.newBlob(Utilities.base64Decode(data), meta.type, 'seal');
+  } catch (e) {
+    console.warn(`社印画像のキャッシュの読み込みに失敗しました: ${e}`);
+    return null;
+  }
+}
+
+/** 社印画像のキャッシュを消す（社印を差し替えた直後に、すぐ反映させたい場合） */
+function clearSealBlobCache_() {
+  const key = sealBlobCacheKey_();
+  if (key) CacheService.getScriptCache().remove(`${key}_meta`);
 }
 
 /**
@@ -343,6 +433,8 @@ function checkSealImageSetting() {
       + 'ファイル > プロジェクトの設定 > スクリプト プロパティ から、社印画像のGoogleドライブURLを設定してください。');
     return;
   }
+  // 社印を差し替えた直後でも、確認と次回の押印に新しい画像が使われるよう覚えている画像を消す
+  clearSealBlobCache_();
   try {
     const source = getSealImageSource_();
     const sizeKb = Math.round(source.blob.getBytes().length / 1024);
@@ -405,27 +497,51 @@ function checkSealImageSetting() {
  * @param {string} [description] 保護の説明
  */
 function protectSheet_(sheet, unprotectedA1Ranges, description) {
-  sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(existing => {
-    try {
-      existing.remove();
-    } catch (e) {
-      console.warn(`既存のシート保護の解除に失敗しました: ${e}`);
-    }
-  });
-
-  const protection = sheet.protect().setDescription(description || '承認済み/差し戻しにつき編集不可');
-  if (unprotectedA1Ranges && unprotectedA1Ranges.length) {
-    protection.setUnprotectedRanges(unprotectedA1Ranges.map(a1 => sheet.getRange(a1)));
+  const existingList = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  let protection;
+  if (existingList.length === 1) {
+    // 保護が1つだけなら、外して掛け直さずにそのまま設定し直す（結果は同じで、処理が速い）。
+    // 保護の対象外にする範囲は、指定が無ければ空にして全体を保護する。
+    protection = existingList[0];
+  } else {
+    existingList.forEach(existing => {
+      try {
+        existing.remove();
+      } catch (e) {
+        console.warn(`既存のシート保護の解除に失敗しました: ${e}`);
+      }
+    });
+    protection = sheet.protect();
   }
-  const editors = protection.getEditors();
-  editors.forEach(editor => {
-    try {
-      protection.removeEditor(editor);
-    } catch (e) {
-      // オーナー自身は編集者リストから外せない仕様のため失敗しうる（想定内）
-      console.warn(`保護編集者(${editor.getEmail()})の削除に失敗しました: ${e}`);
-    }
+  protection.setDescription(description || '承認済み/差し戻しにつき編集不可');
+  protection.setUnprotectedRanges((unprotectedA1Ranges || []).map(a1 => sheet.getRange(a1)));
+
+  // 実行アカウント（ファイルのオーナー＝管理用アカウント）以外の編集者をまとめて外す。
+  // 1人ずつ外すと人数分の通信が発生して遅くなるため。オーナー自身は外せない仕様のため除く。
+  let me = '';
+  try {
+    me = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  } catch (e) {
+    me = '';
+  }
+  const editors = protection.getEditors().filter(editor => {
+    const email = String(editor.getEmail() || '').toLowerCase();
+    return email && email !== me;
   });
+  if (editors.length) {
+    try {
+      protection.removeEditors(editors.map(editor => editor.getEmail()));
+    } catch (e) {
+      // まとめて外せなかった場合は、従来どおり1人ずつ外す
+      editors.forEach(editor => {
+        try {
+          protection.removeEditor(editor);
+        } catch (err) {
+          console.warn(`保護編集者(${editor.getEmail()})の削除に失敗しました: ${err}`);
+        }
+      });
+    }
+  }
   if (protection.canDomainEdit()) {
     protection.setDomainEdit(false);
   }

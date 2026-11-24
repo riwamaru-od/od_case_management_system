@@ -48,7 +48,7 @@ function createDeliveryForCase_(caseNo) {
 
     // 納品書には承認フローが無いため、作成時に社印を押す（見積書・請求書は承認時）
     try {
-      insertSealImage_(file, cells, docType);
+      insertSealImage_(file, cells, docType, sheet);
     } catch (e) {
       // 作成処理自体は成立させるが、押印漏れに気付けるよう操作ログにエラーとして残す
       console.warn(`社印画像の挿入に失敗しました: ${e}`);

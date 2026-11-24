@@ -41,11 +41,14 @@ function createLatestDocument_(docType, caseInfo, stage) {
   verifyAdminAccountExecution_(caseInfo.caseNo, `${docType.label}作成`);
 
   const folder = getCaseDocFolder_(docType, caseInfo, stage);
+  perfMark_('create:folder');
   const templateFile = getFileByIdSafe_(docType.getTemplateFileId(), `${docType.label}テンプレート`);
   const newFile = templateFile.makeCopy(`${caseInfo.caseNo}_${docType.label}`, folder);
+  perfMark_('create:makeCopy');
 
   const sheet = SpreadsheetApp.openById(newFile.getId()).getSheets()[0];
   sheet.setName(`${docType.label}${LATEST_SUFFIX}`);
+  perfMark_('create:open+rename');
 
   // 入力する範囲以外を編集不可にする
   try {
@@ -427,10 +430,55 @@ function exportRangesAsPagedPdfBlob_(fileId, docType, fileName) {
 /** 指定ファイルをPDFとして書き出し、指定フォルダへ保存する */
 function exportFileToPdf_(fileId, folder, fileName, docType) {
   const pageRanges = docType && PDF_PAGE_RANGES[docType.key];
-  const blob = (pageRanges && pageRanges.length)
-    ? exportRangesAsPagedPdfBlob_(fileId, docType, fileName)
-    : exportWholeSheetAsPdfBlob_(fileId, docType, fileName);
+  let blob = null;
+  if (pageRanges && pageRanges.length === 1) {
+    // 1ページだけの書類は、一時ファイルを作らずに元のシートから範囲を指定して直接書き出す
+    blob = exportSingleRangePdfBlob_(fileId, docType, pageRanges[0], fileName);
+  }
+  if (!blob) {
+    blob = (pageRanges && pageRanges.length)
+      ? exportRangesAsPagedPdfBlob_(fileId, docType, fileName)
+      : exportWholeSheetAsPdfBlob_(fileId, docType, fileName);
+  }
   return folder.createFile(blob);
+}
+
+/**
+ * 1ページ分の範囲を、元の書類シートから直接PDFへ書き出す（動作速度の改善）。
+ * 一時スプレッドシートの作成・シートの複製・ゴミ箱への移動が不要になるため、数秒短くなる。
+ * 出力の設定（用紙・余白・ページに合わせる縮尺・中央寄せ）は exportRangesAsPagedPdfBlob_ と同じ。
+ *
+ * 次の場合は null を返し、呼び出し元は従来の一時ファイル方式で書き出す。
+ *  - 見積書との差分ハイライト（社内確認用の黄色）が設定されている（PDFに出してはいけないため）
+ *  - 書き出しに失敗した
+ */
+function exportSingleRangePdfBlob_(fileId, docType, a1Range, fileName) {
+  try {
+    const sheet = getPrimarySheet_(DriveApp.getFileById(fileId), docType);
+    if (sheet.getConditionalFormatRules().some(rule => isQuoteInvoiceDiffRule_(rule))) return null;
+
+    const box = parseA1Range_(a1Range);
+    const params = [
+      'format=pdf', `gid=${sheet.getSheetId()}`,
+      `r1=${box.r1}`, `c1=${box.c1}`, `r2=${box.r2}`, `c2=${box.c2}`,
+      'size=A4', 'portrait=true', 'scale=4',
+      'gridlines=false', 'printtitle=false', 'sheetnames=false',
+      'pagenum=UNDEFINED', 'attachment=false',
+      'horizontal_alignment=CENTER', 'vertical_alignment=TOP',
+      'top_margin=0.3', 'bottom_margin=0.3', 'left_margin=0.3', 'right_margin=0.3',
+    ].join('&');
+    const url = `https://docs.google.com/spreadsheets/d/${fileId}/export?${params}`;
+    const token = ScriptApp.getOAuthToken();
+    const response = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) {
+      console.warn(`範囲指定でのPDF書き出しに失敗したため、一時ファイル方式で書き出します（HTTP ${response.getResponseCode()}）`);
+      return null;
+    }
+    return response.getBlob().setName(`${fileName}.pdf`);
+  } catch (e) {
+    console.warn(`範囲指定でのPDF書き出しに失敗したため、一時ファイル方式で書き出します: ${e}`);
+    return null;
+  }
 }
 
 /** PDF_PAGE_RANGES が無い書類種別向けのフォールバック: シート全体を1ページとして書き出す */

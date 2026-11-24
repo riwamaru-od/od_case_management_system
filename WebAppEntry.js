@@ -82,16 +82,20 @@ function doPost(e) {
     return jsonResponse_({ error: { message: '不明な操作です。', name: 'AppError' } });
   }
 
+  perfStart_(`doPost:${body.action}`);
   let callerEmail;
   let params;
   try {
     callerEmail = verifyCallerToken_(body.callerToken);
+    perfMark_('verifyToken');
     // 社員DBに登録されていない人は、ロール不要の操作（案件中止など）も含めて一切実行させない
     if (!findStaffByEmail_(callerEmail)) {
       throw AppError_('FORBIDDEN', 'このシステムを操作する権限がありません（社員DBに登録されていません）。管理者へ連絡してください。');
     }
     params = normalizeWebAppParams_(body.params);
+    perfMark_('staffCheck');
   } catch (err) {
+    perfEnd_();
     return jsonResponse_({ error: { message: err.message, name: err.name || 'AppError' } });
   }
 
@@ -105,6 +109,7 @@ function doPost(e) {
     });
   } finally {
     ACTIVE_USER_EMAIL_OVERRIDE_ = null;
+    perfEnd_();
   }
 }
 

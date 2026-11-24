@@ -229,12 +229,16 @@ function getCaseInfo_(caseNo) {
   };
 }
 
-/** UI行の内容をキー(案件番号)に基づき全案件DBへ反映する（無ければ追記、あれば上書き） */
-function syncCaseToDb_(caseNo) {
+/**
+ * UI行の内容をキー(案件番号)に基づき全案件DBへ反映する（無ければ追記、あれば上書き）
+ * @param {string} caseNo 案件番号
+ * @param {number} [knownUiRow] 呼び出し元で既に分かっているUIシート上の行（探し直しを省く）
+ */
+function syncCaseToDb_(caseNo, knownUiRow) {
   const uiSheet = getActiveUiSheet_();
   const dbSheet = getActiveDbSheet_();
 
-  const uiRow = findRowByCaseNo_(uiSheet, caseNo);
+  const uiRow = knownUiRow || findRowByCaseNo_(uiSheet, caseNo);
   if (!uiRow) return;
   const values = uiSheet.getRange(uiRow, 1, 1, CASE_LAST_COL).getValues();
 
@@ -256,7 +260,7 @@ function setCaseFields_(caseNo, fieldMap) {
   Object.keys(fieldMap).forEach(colIndex => {
     uiSheet.getRange(uiRow, Number(colIndex)).setValue(fieldMap[colIndex]);
   });
-  syncCaseToDb_(caseNo);
+  syncCaseToDb_(caseNo, uiRow);
 }
 
 /** 案件番号から、UI・DB双方の該当セルへ同一の値を書き込む（1つの列だけ更新したい場合に使用） */

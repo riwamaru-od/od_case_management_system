@@ -33,10 +33,24 @@ function getPeriodFolderName_(periodNumber) {
   return `${periodNumber}期`;
 }
 
+/**
+ * 1回の実行の中で、名前で探したシートを覚えておく（同じ実行の中で何度も呼ばれるため）。
+ * シートが見つからなかった場合は覚えない（同じ実行の中で作成される場合があるため）。
+ */
+const SHEET_LOOKUP_MEMO_ = {};
+
+function getSheetByNameMemo_(name) {
+  const memo = SHEET_LOOKUP_MEMO_[name];
+  if (memo) return memo;
+  const sheet = getMainSpreadsheet_().getSheetByName(name);
+  if (sheet) SHEET_LOOKUP_MEMO_[name] = sheet;
+  return sheet;
+}
+
 /** 現在アクティブな メイン画面UIシート を取得 */
 function getActiveUiSheet_() {
   const names = getPeriodSheetNames_(getCurrentPeriodNumber_());
-  const sheet = getMainSpreadsheet_().getSheetByName(names.ui);
+  const sheet = getSheetByNameMemo_(names.ui);
   if (!sheet) {
     throw AppError_('SHEET_NOT_FOUND', `シート「${names.ui}」が見つかりません。期の切り替え処理が実行されているか確認してください。`);
   }
@@ -46,7 +60,7 @@ function getActiveUiSheet_() {
 /** 現在アクティブな 全案件DBシート を取得 */
 function getActiveDbSheet_() {
   const names = getPeriodSheetNames_(getCurrentPeriodNumber_());
-  const sheet = getMainSpreadsheet_().getSheetByName(names.db);
+  const sheet = getSheetByNameMemo_(names.db);
   if (!sheet) {
     throw AppError_('SHEET_NOT_FOUND', `シート「${names.db}」が見つかりません。期の切り替え処理が実行されているか確認してください。`);
   }
@@ -115,10 +129,32 @@ function getOrCreateSubfolder_(parentFolder, name) {
   return parentFolder.createFolder(name);
 }
 
-/** 書類種別・期・サブフォルダ名から対象フォルダを取得（無ければエラー） */
+/** 期フォルダ・ステージフォルダのIDを覚えておく時間（秒） */
+const DOCUMENT_FOLDER_CACHE_TTL_SEC_ = 3600;
+
+/**
+ * 書類種別・期・サブフォルダ名から対象フォルダを取得（無ければ作成）。
+ * 期フォルダ・ステージフォルダは作成後に動かないため、一度たどったフォルダのIDを覚えておき、
+ * 次からはIDで直接開く（フォルダを名前で1階層ずつ探すと、書類操作のたびに1秒近くかかるため）。
+ * 覚えていたフォルダがゴミ箱に入っている・開けない場合は、従来どおり名前でたどり直す。
+ */
 function getDocumentFolder_(kind, periodNumber, subfolderName) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `DOC_FOLDER_${kind}_${periodNumber}_${subfolderName || ''}`;
+  const cachedId = cache.get(cacheKey);
+  if (cachedId) {
+    try {
+      const folder = DriveApp.getFolderById(cachedId);
+      if (!folder.isTrashed()) return folder;
+    } catch (e) {
+      // 削除・権限変更などで開けない場合は、名前でたどり直す
+    }
+    cache.remove(cacheKey);
+  }
+
   const root = getRootFolder_(kind);
   const periodFolder = getOrCreateSubfolder_(root, getPeriodFolderName_(periodNumber));
-  if (!subfolderName) return periodFolder;
-  return getOrCreateSubfolder_(periodFolder, subfolderName);
+  const folder = subfolderName ? getOrCreateSubfolder_(periodFolder, subfolderName) : periodFolder;
+  cache.put(cacheKey, folder.getId(), DOCUMENT_FOLDER_CACHE_TTL_SEC_);
+  return folder;
 }
