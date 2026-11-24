@@ -604,17 +604,153 @@ function verifyAdminAccountExecution_(caseNo, actionLabel) {
  * これは「オーナー以外の全員が直接編集できない」状態を保証するための追加の防御層。
  * 管理用アカウント自身の編集権限を制限する方法は存在しないため、運用上は
  * ADMIN_TRIGGER_ACCOUNT_EMAIL のログイン情報を日常的な編集作業に使わないことが必須になる。
+ *
+ * 社員の編集権限は、書類ファイル自体ではなく上位フォルダの共有から「継承」されている。
+ * 継承された権限はファイル側から削除できず、DriveApp の removeEditor() は
+ * 「アクセスが拒否されました」で必ず失敗する。また、マイドライブではファイル単位で
+ * 継承を止めることもできない（Drive API が権限不足として拒否する。止められるのはフォルダだけ）。
+ * そこで書類ファイルが入っている案件フォルダ（{案件番号}_{案件名}。書類種別ごとに別フォルダで、
+ * 中身はその書類とPDFだけ）の継承を高度なサービス（Drive API v3）で止め、
+ * それまでアクセスできていた人には閲覧権限を直接付け直す（継承を止めると閲覧権限も外れるため）。
+ * 再作成で社員が再び編集する必要が出たら、restoreInheritedFileAccess_ で継承を戻す。
  */
 function restrictFileEditAccessToAdminOnly_(file) {
-  const owner = file.getOwner();
-  const ownerEmail = owner ? owner.getEmail() : null;
-  file.getEditors().forEach(editor => {
-    if (ownerEmail && editor.getEmail() === ownerEmail) return;
+  const folder = getCaseFolderOfDocument_(file);
+  restrictInheritedAccessToViewOnly_(folder.getId());
+
+  // ファイル自体に直接付いている編集権限があれば、それも閲覧へ下げる
+  // （フォルダから継承した分は、上の処理で既に閲覧になっている。継承分は変更できないので触らない）
+  const fileId = file.getId();
+  const failures = [];
+  listFilePermissions_(fileId).forEach(p => {
+    if (p.role === 'owner' || !hasDirectEditGrant_(p)) return;
     try {
-      file.removeEditor(editor);
-      file.addViewer(editor);
+      Drive.Permissions.update({ role: 'reader' }, fileId, p.id, { supportsAllDrives: true });
     } catch (e) {
-      console.warn(`ファイル編集権限の降格に失敗しました(${editor.getEmail()}): ${e}`);
+      failures.push(`${permissionKey_(p)}: ${e && e.message ? e.message : e}`);
     }
   });
+  if (failures.length) {
+    throw new Error(`一部の権限を閲覧のみへ変更できませんでした（${failures.join(' / ')}）`);
+  }
+}
+
+/**
+ * restrictFileEditAccessToAdminOnly_ で止めた案件フォルダの権限の継承を元に戻す。
+ * 再作成で新しい下書きシートを作ったときに、上位フォルダの共有どおり社員が編集できるようにする。
+ * （降格時に直接付けた閲覧権限は残るが、継承した編集権限の方が優先される）
+ */
+function restoreInheritedFileAccess_(file) {
+  const folderId = getCaseFolderOfDocument_(file).getId();
+  const meta = Drive.Files.get(folderId, { fields: 'inheritedPermissionsDisabled', supportsAllDrives: true });
+  if (meta.inheritedPermissionsDisabled) {
+    Drive.Files.update({ inheritedPermissionsDisabled: false }, folderId, null, { supportsAllDrives: true });
+  }
+}
+
+/**
+ * 書類ファイルが入っている案件フォルダ（{案件番号}_{案件名}）を返す。
+ * 期フォルダやステージフォルダの継承を止めてしまうと他の案件まで閲覧のみになるため、
+ * フォルダ名が書類と同じ案件番号で始まることを確かめ、違えばエラーにする。
+ */
+function getCaseFolderOfDocument_(file) {
+  const caseNo = String(file.getName()).split('_')[0];
+  const parents = file.getParents();
+  while (parents.hasNext()) {
+    const folder = parents.next();
+    if (caseNo && folder.getName().indexOf(`${caseNo}_`) === 0) return folder;
+  }
+  throw new Error(`書類「${file.getName()}」の案件フォルダが見つかりません`);
+}
+
+/**
+ * フォルダ（itemId）の権限の継承を止め、オーナー以外は閲覧のみにする。
+ * それまで継承で編集・閲覧できていた人には、閲覧権限を直接付け直す。
+ */
+function restrictInheritedAccessToViewOnly_(itemId) {
+  const before = listFilePermissions_(itemId).filter(p => p.role !== 'owner');
+  console.log(`権限の降格前の一覧(${itemId}): ${JSON.stringify(before)}`);
+
+  const meta = Drive.Files.get(itemId, { fields: 'inheritedPermissionsDisabled', supportsAllDrives: true });
+  if (!meta.inheritedPermissionsDisabled) {
+    Drive.Files.update({ inheritedPermissionsDisabled: true }, itemId, null, { supportsAllDrives: true });
+  }
+
+  // それまでアクセスできていた人に、閲覧権限を直接付ける。
+  // 継承を止めても、継承されていた権限は一覧に残る（効力が無くなるだけ）ため、その権限を
+  // 「閲覧」へ変更しようとすると「継承元より弱くはできない」と拒否される。そこで新しい権限として
+  // 作成し、直接付いていた編集権限だけを閲覧へ下げる。
+  const failures = [];
+  const seen = {};
+  before.forEach(p => {
+    const key = permissionKey_(p);
+    if (seen[key]) return;
+    seen[key] = true;
+    const resource = { role: 'reader', type: p.type };
+    if (p.emailAddress) resource.emailAddress = p.emailAddress;
+    if (p.domain) resource.domain = p.domain;
+    const createReader = () => Drive.Permissions.create(resource, itemId, { sendNotificationEmail: false, supportsAllDrives: true });
+    const downgrade = () => Drive.Permissions.update({ role: 'reader' }, itemId, p.id, { supportsAllDrives: true });
+    try {
+      if (!(p.permissionDetails || []).length) {
+        // 継承か直接かが分からない場合は、まず閲覧権限の作成を試み、だめなら変更する
+        try {
+          createReader();
+        } catch (e) {
+          if (EDIT_ROLES_.indexOf(p.role) === -1) throw e;
+          downgrade();
+        }
+      } else if (hasDirectEditGrant_(p)) {
+        downgrade();
+      } else if (!hasDirectGrant_(p)) {
+        createReader();
+      }
+    } catch (e) {
+      failures.push(`${key}: ${e && e.message ? e.message : e}`);
+    }
+  });
+  if (failures.length) {
+    throw new Error(`一部の権限を閲覧のみへ変更できませんでした（${failures.join(' / ')}）`);
+  }
+}
+
+/** 編集できる権限の種類（Drive API v3 の role） */
+const EDIT_ROLES_ = ['writer', 'fileOrganizer', 'organizer'];
+
+/** ファイルの権限一覧を Drive API v3 で全件取得する */
+function listFilePermissions_(fileId) {
+  const permissions = [];
+  let pageToken = null;
+  do {
+    const res = Drive.Permissions.list(fileId, {
+      fields: 'nextPageToken, permissions(id, type, role, emailAddress, domain, permissionDetails(inherited, role))',
+      supportsAllDrives: true,
+      pageToken: pageToken,
+    });
+    (res.permissions || []).forEach(p => permissions.push(p));
+    pageToken = res.nextPageToken;
+  } while (pageToken);
+  return permissions;
+}
+
+/**
+ * 権限がこの項目に直接付いているか（継承ではないか）。
+ * permissionDetails が返らない場合は判断できないため、直接付いているものとして扱う。
+ */
+function hasDirectGrant_(p) {
+  const details = p.permissionDetails || [];
+  if (!details.length) return true;
+  return details.some(d => !d.inherited);
+}
+
+/** 直接付いている権限のうち、編集できるものがあるか */
+function hasDirectEditGrant_(p) {
+  const details = p.permissionDetails || [];
+  if (!details.length) return EDIT_ROLES_.indexOf(p.role) !== -1;
+  return details.some(d => !d.inherited && EDIT_ROLES_.indexOf(d.role) !== -1);
+}
+
+/** 権限の対象（ユーザー・グループ・ドメイン・リンクを知っている全員）を識別するキー */
+function permissionKey_(p) {
+  return `${p.type}:${String(p.emailAddress || p.domain || '').toLowerCase()}`;
 }

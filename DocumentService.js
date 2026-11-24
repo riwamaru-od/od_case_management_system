@@ -101,6 +101,16 @@ function recreateLatestDocument_(docType, caseInfo) {
   // このファイルには直後に呼び出し元が新シートへデータ転記を行うため、ここで降格すると
   // 実行者自身がその書き込みに失敗する。降格は呼び出し元（recreateDocumentForCase_）側で
   // データ転記が完了した後に行う。
+  //
+  // 承認・差し戻し・無効化のときに止めた権限の継承を戻し、新しい下書きシートを
+  // 社員が案件フォルダの共有どおり編集できるようにする（戻さないと閲覧しかできない）。
+  try {
+    restoreInheritedFileAccess_(file);
+  } catch (e) {
+    console.warn(`ファイル編集権限の復元に失敗しました: ${e}`);
+    appendOperationLog_(caseInfo.caseNo, `${docType.label}再作成（編集権限）`,
+      `編集権限の復元に失敗: ${e && e.message ? e.message : e}`, true);
+  }
 
   newSheet.setName(`${docType.label}${LATEST_SUFFIX}`);
   // 複製された新シートには旧版の保護（承認時に掛けた全体ロック）が付いていることがあるため、
