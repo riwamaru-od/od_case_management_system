@@ -26,9 +26,20 @@ function include(filename) {
  * （対象シート以外を選択中の場合は caseNo=null を返す。getSelectedCaseNo_ 参照）。
  */
 function api_getSidebarData(preferredCaseNo) {
+  perfStart_('api_getSidebarData');
+  try {
+    return buildSidebarData_(preferredCaseNo);
+  } finally {
+    perfEnd_();
+  }
+}
+
+function buildSidebarData_(preferredCaseNo) {
   const email = getActiveUserEmail_();
   const staff = findStaffByEmail_(email);
+  perfMark_('user+staff');
   let selection = getSelectedCaseNo_();
+  perfMark_('selection');
 
   if (!selection && preferredCaseNo) {
     try {
@@ -47,6 +58,7 @@ function api_getSidebarData(preferredCaseNo) {
     // 見積書の承認依頼時に、宛先として指定できる社員の一覧（任意指定）
     quoteApprovers: listApproversForDocType_('quote'),
   };
+  perfMark_('approvers');
 
   if (!selection) return base;
 
@@ -56,6 +68,7 @@ function api_getSidebarData(preferredCaseNo) {
   } catch (e) {
     return base; // 選択行がまだ案件番号未採番など
   }
+  perfMark_('caseInfo');
 
   base.caseNo = selection;
   base.caseInfo = caseInfo;
@@ -98,7 +111,8 @@ function getSelectedCaseNo_() {
   if (!isUiOrDbSheet) return null;
 
   try {
-    const row = ss.getActiveRange() && ss.getActiveRange().getRow();
+    const activeRange = ss.getActiveRange();
+    const row = activeRange && activeRange.getRow();
     if (!row || row < dataStartRow) return null;
 
     const caseNo = activeSheet.getRange(row, CASE_COLS.CASE_NO).getValue();

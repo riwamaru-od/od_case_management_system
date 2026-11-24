@@ -70,6 +70,33 @@ function withLock_(actionLabel, fn, caseNo) {
  */
 let ACTIVE_USER_EMAIL_OVERRIDE_ = null;
 
+/**
+ * 処理時間の計測（動作速度のKPI確認用）。1回の実行の中で区間ごとの所要時間を集め、
+ * perfEnd_ で「[perf] 操作名 total=…ms 区間=…ms …」の1行を実行ログへ出す。
+ * Apps Script の「実行数」画面から、どの区間に時間が掛かっているかを確認できる。
+ * perfStart_ を呼んでいない実行では perfMark_ は何もしない。
+ */
+let PERF_ = null;
+
+function perfStart_(label) {
+  const now = Date.now();
+  PERF_ = { label: label, start: now, last: now, phases: [] };
+}
+
+function perfMark_(phase) {
+  if (!PERF_) return;
+  const now = Date.now();
+  PERF_.phases.push(`${phase}=${now - PERF_.last}`);
+  PERF_.last = now;
+}
+
+function perfEnd_() {
+  if (!PERF_) return;
+  const p = PERF_;
+  PERF_ = null;
+  console.log(`[perf] ${p.label} total=${Date.now() - p.start}ms ${p.phases.join(' ')}`);
+}
+
 /** 現在の実行ユーザーのメールアドレス */
 function getActiveUserEmail_() {
   if (ACTIVE_USER_EMAIL_OVERRIDE_) return ACTIVE_USER_EMAIL_OVERRIDE_;

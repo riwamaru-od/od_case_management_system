@@ -26,7 +26,9 @@ function createDocumentForCase_(docTypeKey, caseNo) {
       throw AppError_('INVALID_STATE', '見積書が再作成・差し戻し中です。見積書が再度承認されてから請求書を作成してください。');
     }
 
+    perfMark_('createLock+caseInfo');
     const file = createLatestDocument_(docType, caseInfo, 'created');
+    perfMark_('copyTemplate+lock');
 
     if (docTypeKey === 'quote') {
       fillQuoteDocument_(file, caseInfo);
@@ -34,6 +36,7 @@ function createDocumentForCase_(docTypeKey, caseNo) {
       const quoteFileId = extractFileIdFromUrl_(caseInfo.quoteLink);
       fillInvoiceDocument_(file, caseInfo, quoteFileId);
     }
+    perfMark_('fillDocument');
 
     const fieldUpdates = {
       [docType.col.link]: file.getUrl(),
@@ -44,7 +47,9 @@ function createDocumentForCase_(docTypeKey, caseNo) {
     if (docType.col.startedAt) fieldUpdates[docType.col.startedAt] = formatDateTime_(new Date());
     setCaseFields_(caseNo, fieldUpdates);
 
+    perfMark_('setCaseFields');
     appendOperationLog_(caseNo, `${docType.label}作成`, `URL: ${file.getUrl()}`, false);
+    perfMark_('operationLog');
 
     return { url: file.getUrl() };
   }, caseNo);
@@ -79,6 +84,7 @@ function completeDocumentForCase_(docTypeKey, caseNo, comment, approverEmail) {
     const email = getActiveUserEmail_();
     const staff = findStaffByEmail_(email);
     const now = new Date();
+    perfMark_('completeLock+caseInfo');
 
     const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
     const file = DriveApp.getFileById(fileId);
@@ -94,12 +100,15 @@ function completeDocumentForCase_(docTypeKey, caseNo, comment, approverEmail) {
       [CASE_COLS.STATUS]: docType.status.drafted,
     };
     if (docType.col.rejectedAt) fieldUpdates[docType.col.rejectedAt] = '';
+    perfMark_('writeDocument');
     setCaseFields_(caseNo, fieldUpdates);
+    perfMark_('setCaseFields');
 
     notifyApprovalRequest_(docType.label, {
       caseNo: caseInfo.caseNo, caseName: caseInfo.caseName, clientName: caseInfo.clientName,
       requesterName: staff ? staff.name : email, docUrl: file.getUrl(),
     }, comment, designatedApprover ? designatedApprover.email : '');
+    perfMark_('notify');
 
     const logDetail = [comment || '', designatedApprover ? `承認者指定: ${designatedApprover.name}` : '']
       .filter(Boolean).join(' / ');
@@ -119,6 +128,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     const caseInfo = getCaseInfo_(caseNo);
     const staff = findStaffByEmail_(email);
     const now = new Date();
+    perfMark_('approveLock+caseInfo');
 
     const fileId = extractFileIdFromUrl_(caseInfo[`${docTypeKey}Link`]);
     const file = DriveApp.getFileById(fileId);
@@ -130,18 +140,21 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
 
     // 承認されたシートを保護（編集不可にする）。
     // 見積書のみ、承認後も編集を続ける必要がある作業用エリアは保護対象から除く。
+    perfMark_('writeDocument');
     try {
       protectSheet_(sheet, docType.unprotectedRangesAfterApproval);
     } catch (e) {
       console.warn(`シート保護(protectSheet_)の適用に失敗しました: ${e}`);
     }
+    perfMark_('protectSheet');
     try {
-      insertSealImage_(file, cells, docType);
+      insertSealImage_(file, cells, docType, sheet);
     } catch (e) {
       // 承認処理自体は成立させるが、押印漏れに気付けるよう操作ログにエラーとして残す
       console.warn(`社印画像の挿入に失敗しました: ${e}`);
       appendOperationLog_(caseNo, `${docType.label}承認（社印）`, `社印画像の挿入に失敗: ${e && e.message ? e.message : e}`, true);
     }
+    perfMark_('sealImage');
 
 
     const approverName = staff ? staff.name : email;
@@ -153,6 +166,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     // 再承認が完了したのでフラグを解除する（＝PDF出力ボタンが再び活性になる）
     if (docType.col.reapprovalPending) approvalUpdates[docType.col.reapprovalPending] = '';
     setCaseFields_(caseNo, approvalUpdates);
+    perfMark_('setCaseFields');
 
     if (docTypeKey === 'invoice') {
       // 請求書は承認済み以降、フォルダを「未請求案件」→「請求中案件」へ移動
@@ -166,6 +180,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     } catch (e) {
       console.warn(`ファイル編集権限の降格に失敗しました: ${e}`);
     }
+    perfMark_('restrictEditors');
 
     // 作成者へ通知
     const creatorStaff = getAllStaff_().find(s => s.name === caseInfo[`${docTypeKey}Creator`]);
@@ -174,8 +189,10 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
       approverName: approverName,
     }, comment);
     if (creatorStaff) notifyStaff_(creatorStaff.email, notifyMsg.subject, notifyMsg.body, notifyMsg.htmlBody);
+    perfMark_('notify');
 
     appendOperationLog_(caseNo, `${docType.label}承認`, comment || '', false);
+    perfMark_('operationLog');
 
     return { status: docType.status.approved };
   }, caseNo);
@@ -416,14 +433,18 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
     setCellValue_(sheet, cells.PDF_OUTPUT_BY, staff ? staff.name : email);
     setCellValue_(sheet, cells.PDF_OUTPUT_AT, formatDateTime_(now));
     SpreadsheetApp.flush();
+    perfMark_('exportLock+writeDocument');
 
     const stage = docTypeKey === 'invoice' ? 'billed' : 'created';
     const folder = getCaseDocFolder_(docType, caseInfo, stage);
+    perfMark_('resolveFolder');
     const pdfFile = exportFileToPdf_(fileId, folder, `${docType.label}_${caseInfo.caseNo}`, docType);
+    perfMark_('exportPdf');
 
     // 最新版のPDFだけを残す。出力に成功してから古い方を消すことで、
     // 出力が失敗した場合に既存のPDFまで失われないようにする
     const trashedPdfCount = trashSupersededPdfs_(folder, pdfFile);
+    perfMark_('trashOldPdf');
 
     const fieldUpdates = { [docType.col.outputLink]: pdfFile.getUrl() };
     if (docType.col.outputBy) {
@@ -438,7 +459,9 @@ function exportDocumentPdfForCase_(docTypeKey, caseNo) {
 
     const pdfLogDetail = [`URL: ${pdfFile.getUrl()}`, trashedPdfCount ? `古いPDF${trashedPdfCount}件を削除` : '']
       .filter(Boolean).join(' / ');
+    perfMark_('setCaseFields');
     appendOperationLog_(caseNo, `${docType.label}PDF出力`, pdfLogDetail, false);
+    perfMark_('operationLog');
 
     return { pdfUrl: pdfFile.getUrl() };
   }, caseNo);

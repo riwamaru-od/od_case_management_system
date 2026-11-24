@@ -33,18 +33,80 @@
   let pollTimer = null;
   let quoteApprovers = [];
 
+  // 選択中セルの変化を反映するための定期取得。
+  // サーバー呼び出し1回には1〜2秒かかるため、前の応答を待たずに一定間隔で問い合わせ、
+  // 行を選び直してからサイドバーに反映されるまでの待ち時間を短くする（動作速度の改善）。
+  // 同時に問い合わせ中にできる数には上限を設け、サーバーへの負荷が増えすぎないようにする。
+  const POLL_INTERVAL_MS = 1000;
+  const MAX_IN_FLIGHT = 3;
+  // 応答が返らないまま残った問い合わせで定期取得が止まらないよう、一定時間を過ぎたものは数えない
+  const IN_FLIGHT_TIMEOUT_MS = 30000;
+  const inFlightStartedAt = {}; // 通し番号 → 問い合わせた時刻
+  let requestSeq = 0;   // 問い合わせごとの通し番号
+  let renderedSeq = 0;  // 画面に反映済みの最新の通し番号（古い応答で上書きしないため）
+  let lastErrorShownAt = 0;
+
   document.addEventListener('DOMContentLoaded', () => {
     refreshData();
-    pollTimer = setInterval(refreshData, 4000); // 選択中セルの変化を定期的に反映
+    startPolling();
+    // 別のタブを見ている間は問い合わせを止め、戻ってきたらすぐに最新の状態を取りに行く
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        refreshData();
+        startPolling();
+      }
+    });
   });
 
-  function refreshData(targetCaseNo) {
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => refreshData(), POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  /**
+   * サイドバーの表示内容を取得する。
+   * force=true は操作の完了直後など、問い合わせ中の数に関係なく必ず取りに行く場合に使う。
+   */
+  function refreshData(targetCaseNo, force) {
     if (isBusy) return; // 処理中は選択変更による再描画で競合しないようにする
+    if (!force && countInFlight() >= MAX_IN_FLIGHT) return;
     const caseNoToFetch = targetCaseNo || currentCaseNo;
+    const seq = ++requestSeq;
+    inFlightStartedAt[seq] = Date.now();
     google.script.run
-      .withSuccessHandler(renderData)
-      .withFailureHandler(err => showToast(err && err.message ? err.message : String(err), true))
+      .withSuccessHandler(data => {
+        delete inFlightStartedAt[seq];
+        // 後から送った問い合わせの応答が先に届いていれば、古い応答は捨てる
+        if (seq < renderedSeq) return;
+        renderedSeq = seq;
+        renderData(data);
+      })
+      .withFailureHandler(err => {
+        delete inFlightStartedAt[seq];
+        // 定期取得の失敗が続いても、同じエラーを短い間隔で何度も表示しない
+        const now = Date.now();
+        if (now - lastErrorShownAt < 10000) return;
+        lastErrorShownAt = now;
+        showToast(err && err.message ? err.message : String(err), true);
+      })
       .api_getSidebarData(caseNoToFetch);
+  }
+
+  /** 応答待ちの問い合わせ数（一定時間を過ぎたものは返ってこないとみなして除く） */
+  function countInFlight() {
+    const now = Date.now();
+    return Object.keys(inFlightStartedAt).filter(seq => {
+      if (now - inFlightStartedAt[seq] < IN_FLIGHT_TIMEOUT_MS) return true;
+      delete inFlightStartedAt[seq];
+      return false;
+    }).length;
   }
 
   function renderData(data) {
@@ -126,7 +188,7 @@
     const pendingTab = openPendingTab();
     setBusy(true);
     google.script.run
-      .withSuccessHandler(result => { setBusy(false); handleActionResult(result, pendingTab); refreshData(currentCaseNo); })
+      .withSuccessHandler(result => { setBusy(false); handleActionResult(result, pendingTab); refreshData(currentCaseNo, true); })
       .withFailureHandler(err => {
         setBusy(false);
         closePendingTab(pendingTab);
@@ -196,7 +258,7 @@
     closeComment();
     setBusy(true);
     const runner = google.script.run
-      .withSuccessHandler(result => { setBusy(false); handleActionResult(result); refreshData(currentCaseNo); })
+      .withSuccessHandler(result => { setBusy(false); handleActionResult(result); refreshData(currentCaseNo, true); })
       .withFailureHandler(err => { setBusy(false); showToast(err && err.message ? err.message : String(err), true); });
     if (action === APPROVER_SELECT_ACTION) {
       runner[fnName](currentCaseNo, comment, approverEmail);
