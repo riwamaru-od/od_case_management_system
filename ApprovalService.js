@@ -86,7 +86,7 @@ function completeDocumentForCase_(docTypeKey, caseNo, comment, approverEmail) {
     const cells = docType.cells();
     setCellValue_(sheet, cells.CREATOR_NAME, staff ? staff.name : email);
     setCellValue_(sheet, cells.CREATED_AT, formatDateTime_(now));
-    if (comment) setCellValue_(sheet, cells.REQUEST_COMMENT, comment);
+    if (comment) setCellValue_(sheet, cells.REQUEST_COMMENT, toSheetText_(comment));
 
     const fieldUpdates = {
       [docType.col.creator]: staff ? staff.name : email,
@@ -126,7 +126,7 @@ function approveDocumentForCase_(docTypeKey, caseNo, comment) {
     const cells = docType.cells();
     setCellValue_(sheet, cells.APPROVER_NAME, staff ? staff.name : email);
     setCellValue_(sheet, cells.APPROVED_AT, formatDateTime_(now));
-    if (comment) setCellValue_(sheet, cells.APPROVE_COMMENT, comment);
+    if (comment) setCellValue_(sheet, cells.APPROVE_COMMENT, toSheetText_(comment));
 
     // 承認されたシートを保護（編集不可にする）。
     // 見積書のみ、承認後も編集を続ける必要がある作業用エリアは保護対象から除く。

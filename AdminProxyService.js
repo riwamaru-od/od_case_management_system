@@ -16,7 +16,12 @@
  * 自己申告のアドレスを信用すると、URLを知っている人が他人になりすませてしまうため。
  */
 function callAsAdmin_(action, params) {
-  const url = getProp_(PROP_KEYS.WEBAPP_URL);
+  const url = getProp_(PROP_KEYS.WEBAPP_URL).trim();
+  // 本人のアクセストークンを送るため、送り先がApps ScriptのWebアプリであることを必ず確かめる
+  // （スクリプトプロパティを書き換えられた場合に、トークンが外部へ送られるのを防ぐ）
+  if (!WEBAPP_URL_PATTERN_.test(url)) {
+    throw AppError_('INVALID_WEBAPP_URL', 'WebアプリのURLの設定が不正です。管理者へ連絡してください。');
+  }
   const callerToken = ScriptApp.getOAuthToken();
 
   const response = UrlFetchApp.fetch(url, {

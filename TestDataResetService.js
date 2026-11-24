@@ -29,6 +29,7 @@
  * 管理用アカウントでこの関数を選択して実行すること。
  */
 function runResetForUserTest() {
+  assertAdminOperator_('テストデータのリセット');
   const message = resetForUserTest_();
   try {
     SpreadsheetApp.getUi().alert('テストデータのリセット完了\n\n' + message);
@@ -44,6 +45,7 @@ function runResetForUserTest() {
  * 「実行する関数」プルダウンから選べるようにするため。
  */
 function runRestoreUiHeaderRow2() {
+  assertAdminOperator_('見出し行の復元');
   const ss = getMainSpreadsheet_();
   const master = ss.getSheetByName(MASTER_UI_SHEET_NAME);
   if (!master) throw AppError_('SHEET_NOT_FOUND', `シート「${MASTER_UI_SHEET_NAME}」が見つかりません。`);

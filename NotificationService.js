@@ -427,6 +427,7 @@ const NOTIFICATION_SAMPLE_STAFF_NAME = '岩丸';
  * 選べるようにするため。実際の案件データは読み書きしない。
  */
 function sendAllNotificationSamplesForTest() {
+  assertAdminOperator_('通知サンプルの送信');
   const staff = getAllStaff_().filter(s => String(s.name).indexOf(NOTIFICATION_SAMPLE_STAFF_NAME) !== -1);
   if (staff.length !== 1) {
     throw new Error(`社員DBで「${NOTIFICATION_SAMPLE_STAFF_NAME}」を含む氏名が1件に絞れません（${staff.length}件）。`);

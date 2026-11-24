@@ -509,6 +509,7 @@ function buildOverdueBillingStaffMessage_(cases) {
  *      動作確認以外の目的では実行しないこと。
  */
 function runScheduledNotificationsForTest() {
+  assertAdminOperator_('定期通知のテスト送信');
   const results = [];
   [
     ['未承認案件レポート', sendUnapprovedSummaryReport_],

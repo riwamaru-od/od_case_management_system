@@ -20,8 +20,9 @@
  * ANYONE 指定に切り替えて解決したが、その代償として Google は doPost 内で
  * Session.getActiveUser() に呼び出し元の身元を渡さなくなる（空文字になる）。
  * そのため本人確認は、callAsAdmin_() が呼び出し元自身のOAuthアクセストークンを
- * callerToken としてリクエストに含め、doPost 側でそのトークンをGoogleの userinfo に
- * 照会して得たメールアドレスを ACTIVE_USER_EMAIL_OVERRIDE_（Utils.gs）にセットし、
+ * callerToken としてリクエストに含め、doPost 側でそのトークンをGoogleの tokeninfo に
+ * 照会し、発行先がこのスクリプトであることと持ち主のメールアドレスを確かめたうえで
+ * ACTIVE_USER_EMAIL_OVERRIDE_（Utils.gs）にセットし、
  * getActiveUserEmail_() に使わせる方式で代替している。
  * トークンは本人にしか発行されないため、URLを知っている人でも他人にはなりすませない
  * （以前はメールアドレスそのものを受け取っていたため、なりすましが可能だった）。
@@ -54,30 +55,49 @@ const WEBAPP_ACTIONS_ = {
   restoreCase: p => restoreCaseForCase_(p.caseNo, p.comment),
 };
 
-/** Webアプリの唯一の入口。POST本文は {action, params} 形式のJSON。 */
+/** doPost が受け付けるパラメーターの最大長（異常に大きな入力でシートや通知を汚さないため） */
+const WEBAPP_PARAM_MAX_LENGTH_ = {
+  caseNo: 50,
+  comment: 2000,
+  approverEmail: 254,
+};
+
+/** Webアプリの唯一の入口。POST本文は {action, params, callerToken} 形式のJSON。 */
 function doPost(e) {
   let body;
   try {
-    body = JSON.parse(e.postData.contents);
+    body = JSON.parse(e && e.postData ? e.postData.contents : '');
   } catch (err) {
+    body = null;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return jsonResponse_({ error: { message: 'リクエストの形式が不正です。', name: 'AppError' } });
   }
 
-  const action = WEBAPP_ACTIONS_[body.action];
+  // プロトタイプ上のプロパティ（toString 等）をアクション名として解決させない
+  const action = (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(WEBAPP_ACTIONS_, body.action))
+    ? WEBAPP_ACTIONS_[body.action] : null;
   if (!action) {
-    return jsonResponse_({ error: { message: `不明な操作です: ${body.action}`, name: 'AppError' } });
+    // 送られてきた値はそのまま返さない（応答への任意文字列の反射を避ける）
+    return jsonResponse_({ error: { message: '不明な操作です。', name: 'AppError' } });
   }
 
   let callerEmail;
+  let params;
   try {
     callerEmail = verifyCallerToken_(body.callerToken);
+    // 社員DBに登録されていない人は、ロール不要の操作（案件中止など）も含めて一切実行させない
+    if (!findStaffByEmail_(callerEmail)) {
+      throw AppError_('FORBIDDEN', 'このシステムを操作する権限がありません（社員DBに登録されていません）。管理者へ連絡してください。');
+    }
+    params = normalizeWebAppParams_(body.params);
   } catch (err) {
     return jsonResponse_({ error: { message: err.message, name: err.name || 'AppError' } });
   }
 
   ACTIVE_USER_EMAIL_OVERRIDE_ = callerEmail;
   try {
-    const result = action(body.params || {});
+    const result = action(params);
     return jsonResponse_({ result: result });
   } catch (err) {
     return jsonResponse_({
@@ -88,16 +108,88 @@ function doPost(e) {
   }
 }
 
-/** 呼び出し元のアクセストークンの持ち主を確かめる照会先 */
-const CALLER_USERINFO_URL_ = 'https://www.googleapis.com/oauth2/v3/userinfo';
+/**
+ * doPost に渡されたパラメーターを、各処理が想定する型・長さにそろえる。
+ * 想定外の型（オブジェクト・配列など）や長すぎる値は、処理に渡す前に弾く。
+ */
+function normalizeWebAppParams_(raw) {
+  const p = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const asText = (key, label) => {
+    const v = p[key];
+    if (v == null || v === '') return '';
+    if (typeof v !== 'string' && typeof v !== 'number') {
+      throw AppError_('INVALID_PARAM', `${label}の形式が不正です。`);
+    }
+    const text = String(v).trim();
+    if (text.length > WEBAPP_PARAM_MAX_LENGTH_[key]) {
+      throw AppError_('INVALID_PARAM', `${label}が長すぎます（${WEBAPP_PARAM_MAX_LENGTH_[key]}文字以内にしてください）。`);
+    }
+    return text;
+  };
+  const caseNo = asText('caseNo', '案件番号');
+  if (!caseNo) {
+    throw AppError_('INVALID_PARAM', '案件番号が指定されていません。');
+  }
+  const approverEmail = asText('approverEmail', '承認者のメールアドレス');
+  if (approverEmail && !/^[^\s@]+@[^\s@]+$/.test(approverEmail)) {
+    throw AppError_('INVALID_PARAM', '承認者のメールアドレスの形式が不正です。');
+  }
+  return {
+    caseNo: caseNo,
+    comment: asText('comment', 'コメント'),
+    approverEmail: approverEmail,
+  };
+}
+
+/** アクセストークンの発行先・持ち主を確かめる照会先 */
+const CALLER_TOKENINFO_URL_ = 'https://oauth2.googleapis.com/tokeninfo';
+
+/**
+ * アクセストークンをGoogleに照会し、その内容（発行先 azp・メールアドレス等）を返す。
+ * トークンはURLに載せず、POST本文で送る（アクセスログ等に残さないため）。
+ * 無効・期限切れのトークンの場合は null を返す。
+ */
+function fetchTokenInfo_(token) {
+  const response = UrlFetchApp.fetch(CALLER_TOKENINFO_URL_, {
+    method: 'post',
+    payload: { access_token: token },
+    muteHttpExceptions: true,
+  });
+  if (response.getResponseCode() !== 200) return null;
+  try {
+    return JSON.parse(response.getContentText());
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * このスクリプト（Apps Scriptプロジェクト）のOAuthクライアントID。
+ * 管理用アカウント自身のトークンを照会して求める。呼び出し元のトークンも同じスクリプトの
+ * ScriptApp.getOAuthToken() で発行されるため、正規の呼び出しなら発行先（azp）が一致する。
+ */
+function getOwnOAuthClientId_() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('OWN_OAUTH_CLIENT_ID');
+  if (cached) return cached;
+  const info = fetchTokenInfo_(ScriptApp.getOAuthToken());
+  const clientId = info && (info.azp || info.aud);
+  if (!clientId) {
+    throw AppError_('UNAUTHENTICATED', '本人確認の準備に失敗しました（このスクリプトのクライアントIDを取得できません）。管理者へ連絡してください。');
+  }
+  cache.put('OWN_OAUTH_CLIENT_ID', clientId, 21600);
+  return clientId;
+}
 
 /**
  * callAsAdmin_() から渡されたアクセストークンをGoogleに照会し、持ち主のメールアドレスを返す。
- * トークンが無い・無効・期限切れ、またはメールアドレスが確認済みでない場合は例外を投げる。
- * トークンはURLに載せず、Authorizationヘッダーで送る（ログ等に残さないため）。
+ * 次のいずれかに当てはまる場合は例外を投げる。
+ *  - トークンが無い・無効・期限切れ
+ *  - トークンの発行先がこのスクリプトではない（他のアプリ向けに発行されたトークンの流用を防ぐ）
+ *  - メールアドレスが確認済みでない
  */
 function verifyCallerToken_(token) {
-  if (!token) {
+  if (!token || typeof token !== 'string' || token.length > 4096) {
     throw AppError_('UNAUTHENTICATED', '操作した人を確認できませんでした。シートを開き直してから、もう一度お試しください。');
   }
   // 照会のぶん操作が遅くなるため、確認済みのトークンは10分間覚えておく。
@@ -108,20 +200,23 @@ function verifyCallerToken_(token) {
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const response = UrlFetchApp.fetch(CALLER_USERINFO_URL_, {
-    headers: { Authorization: 'Bearer ' + token },
-    muteHttpExceptions: true,
-  });
-  if (response.getResponseCode() !== 200) {
-    throw AppError_('UNAUTHENTICATED',
-      `操作した人を確認できませんでした（HTTP ${response.getResponseCode()}）。シートを開き直してから、もう一度お試しください。`);
+  const info = fetchTokenInfo_(token);
+  if (!info) {
+    throw AppError_('UNAUTHENTICATED', '操作した人を確認できませんでした。シートを開き直してから、もう一度お試しください。');
   }
-  const info = JSON.parse(response.getContentText());
-  if (!info.email || info.email_verified !== true) {
+  const issuedTo = info.azp || info.aud;
+  if (!issuedTo || issuedTo !== getOwnOAuthClientId_()) {
+    throw AppError_('UNAUTHENTICATED', '操作した人を確認できませんでした（このシステム以外で発行された認証情報です）。');
+  }
+  const verified = info.email_verified === true || info.email_verified === 'true';
+  if (!info.email || !verified) {
     throw AppError_('UNAUTHENTICATED', '操作した人のメールアドレスを確認できませんでした。管理者へ連絡してください。');
   }
-  cache.put(cacheKey, info.email, 600);
-  return info.email;
+  const email = String(info.email).trim().toLowerCase();
+  // トークンの残り有効期間より長くは覚えておかない
+  const ttl = Math.max(1, Math.min(600, Number(info.expires_in) || 600));
+  cache.put(cacheKey, email, ttl);
+  return email;
 }
 
 function jsonResponse_(obj) {

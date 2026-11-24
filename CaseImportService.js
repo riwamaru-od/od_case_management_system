@@ -28,6 +28,7 @@
 
 /** スクリプトエディタから実行する: 移行データシートを点検する（書き込みは行わない） */
 function runCheckMigrationSheet() {
+  assertAdminOperator_('移行データの点検');
   const { rows, errors } = readAndValidateMigrationRows_();
   const message = errors.length
     ? [`不備が${errors.length}件あります。修正してから再度点検してください。`, '', ...errors].join('\n')
@@ -37,6 +38,7 @@ function runCheckMigrationSheet() {
 
 /** スクリプトエディタから実行する: 移行データシートの案件を取り込む */
 function runImportCasesFromMigrationSheet() {
+  assertAdminOperator_('旧一覧からの案件移行');
   const message = importCasesFromMigrationSheet_();
   showMigrationMessage_('移行データの取り込み', message);
 }
