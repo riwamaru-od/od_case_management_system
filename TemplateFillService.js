@@ -503,6 +503,8 @@ function protectSheet_(sheet, unprotectedA1Ranges, description) {
     // 保護が1つだけなら、外して掛け直さずにそのまま設定し直す（結果は同じで、処理が速い）。
     // 保護の対象外にする範囲は、指定が無ければ空にして全体を保護する。
     protection = existingList[0];
+    // 警告のみの保護が付いていた場合は、編集をブロックする通常の保護に切り替える
+    if (protection.isWarningOnly()) protection.setWarningOnly(false);
   } else {
     existingList.forEach(existing => {
       try {
